@@ -90,6 +90,10 @@ def save_cloud_state():
     except Exception as e:
         return False, str(e)
 
+# Initialize Edit State
+if "edit_mode" not in st.session_state:
+    st.session_state.edit_mode = {"type": None, "index": None}
+
 # Load state from cloud once at startup
 if "cloud_loaded" not in st.session_state:
     cloud_data = load_cloud_state() or {}
@@ -524,16 +528,52 @@ with nav_tab3:
             st.markdown("#### Existing Cleaning Logs")
             to_del = None
             for i, log in enumerate(st.session_state.cleaning_logs):
-                col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 2, 2, 1, 1])
-                col1.write(f"📅 {log.get('Date', 'N/A')}")
-                col2.write(f"👤 {log.get('Host', '')}")
-                col3.write(f"🚗 {log.get('Vehicle', '')}")
-                col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
-                col5.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
-                if col6.button("🗑️", key=f"del_c_{i}"):
-                    to_del = i
+                # EDIT MODE
+                if st.session_state.edit_mode.get("type") == "clean" and st.session_state.edit_mode.get("index") == i:
+                    with st.container():
+                        st.write(f"**✏️ Editing Log {i+1}**")
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            e_date = st.date_input("Date", pd.to_datetime(log.get("Date", datetime.now())).date(), key=f"e_cd_{i}")
+                            e_host = st.selectbox("Host Cleaner", hosts, index=hosts.index(log.get("Host")) if log.get("Host") in hosts else 0, key=f"e_ch_{i}")
+                            car_opts = [v["name"] for v in vehicle_configs] + ["General / Unspecified"]
+                            e_car = st.selectbox("Vehicle", car_opts, index=car_opts.index(log.get("Vehicle")) if log.get("Vehicle") in car_opts else 0, key=f"e_cv_{i}")
+                        with ec2:
+                            e_guest = st.selectbox("Related Renter", guest_list, index=guest_list.index(log.get("Guest")) if log.get("Guest") in guest_list else 0, key=f"e_cg_{i}")
+                            e_amt = st.number_input("Cleaning Fee ($)", min_value=0.0, value=float(log.get("Amount ($)", 0.0)), step=5.0, key=f"e_ca_{i}")
+                        
+                        sc1, sc2 = st.columns([1, 5])
+                        if sc1.button("💾 Save", key=f"e_csave_{i}"):
+                            st.session_state.cleaning_logs[i] = {
+                                "Date": e_date.strftime("%Y-%m-%d"),
+                                "Host": e_host,
+                                "Vehicle": e_car,
+                                "Guest": e_guest,
+                                "Amount ($)": e_amt
+                            }
+                            st.session_state.edit_mode = {"type": None, "index": None}
+                            st.rerun()
+                        if sc2.button("❌ Cancel", key=f"e_ccancel_{i}"):
+                            st.session_state.edit_mode = {"type": None, "index": None}
+                            st.rerun()
+                        st.markdown("---")
+                # VIEW MODE
+                else:
+                    col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 2, 2, 1, 0.5, 0.5])
+                    col1.write(f"📅 {log.get('Date', 'N/A')}")
+                    col2.write(f"👤 {log.get('Host', '')}")
+                    col3.write(f"🚗 {log.get('Vehicle', '')}")
+                    col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
+                    col5.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
+                    if col6.button("✏️", key=f"edit_c_{i}"):
+                        st.session_state.edit_mode = {"type": "clean", "index": i}
+                        st.rerun()
+                    if col7.button("🗑️", key=f"del_c_{i}"):
+                        to_del = i
+
             if to_del is not None:
                 st.session_state.cleaning_logs.pop(to_del)
+                st.session_state.edit_mode = {"type": None, "index": None}
                 st.rerun()
 
     # --- EXPENSES ---
@@ -564,17 +604,55 @@ with nav_tab3:
             st.markdown("#### Existing Expense Logs")
             to_del = None
             for i, log in enumerate(st.session_state.expense_logs):
-                col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 2, 2, 2, 1, 1])
-                col1.write(f"📅 {log.get('Date', 'N/A')}")
-                col2.write(f"👤 {log.get('Host', '')}")
-                col3.write(f"🚗 {log.get('Vehicle', '')}")
-                col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
-                col5.write(f"📝 {log.get('Description', '')}")
-                col6.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
-                if col7.button("🗑️", key=f"del_e_{i}"):
-                    to_del = i
+                # EDIT MODE
+                if st.session_state.edit_mode.get("type") == "exp" and st.session_state.edit_mode.get("index") == i:
+                    with st.container():
+                        st.write(f"**✏️ Editing Log {i+1}**")
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            e_date = st.date_input("Date", pd.to_datetime(log.get("Date", datetime.now())).date(), key=f"e_ed_{i}")
+                            e_host = st.selectbox("Payer Host", hosts, index=hosts.index(log.get("Host")) if log.get("Host") in hosts else 0, key=f"e_eh_{i}")
+                            car_opts = [v["name"] for v in vehicle_configs] + ["General Fleet"]
+                            e_car = st.selectbox("Vehicle", car_opts, index=car_opts.index(log.get("Vehicle")) if log.get("Vehicle") in car_opts else 0, key=f"e_ev_{i}")
+                        with ec2:
+                            e_guest = st.selectbox("Related Renter", guest_list, index=guest_list.index(log.get("Guest")) if log.get("Guest") in guest_list else 0, key=f"e_eg_{i}")
+                            e_amt = st.number_input("Expense ($)", min_value=0.0, value=float(log.get("Amount ($)", 0.0)), step=5.0, key=f"e_ea_{i}")
+                            e_desc = st.text_input("Description", log.get("Description", ""), key=f"e_edesc_{i}")
+                        
+                        sc1, sc2 = st.columns([1, 5])
+                        if sc1.button("💾 Save", key=f"e_esave_{i}"):
+                            st.session_state.expense_logs[i] = {
+                                "Date": e_date.strftime("%Y-%m-%d"),
+                                "Host": e_host,
+                                "Vehicle": e_car,
+                                "Guest": e_guest,
+                                "Description": e_desc,
+                                "Amount ($)": e_amt
+                            }
+                            st.session_state.edit_mode = {"type": None, "index": None}
+                            st.rerun()
+                        if sc2.button("❌ Cancel", key=f"e_ecancel_{i}"):
+                            st.session_state.edit_mode = {"type": None, "index": None}
+                            st.rerun()
+                        st.markdown("---")
+                # VIEW MODE
+                else:
+                    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 2, 2, 2, 1, 0.5, 0.5])
+                    col1.write(f"📅 {log.get('Date', 'N/A')}")
+                    col2.write(f"👤 {log.get('Host', '')}")
+                    col3.write(f"🚗 {log.get('Vehicle', '')}")
+                    col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
+                    col5.write(f"📝 {log.get('Description', '')}")
+                    col6.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
+                    if col7.button("✏️", key=f"edit_e_{i}"):
+                        st.session_state.edit_mode = {"type": "exp", "index": i}
+                        st.rerun()
+                    if col8.button("🗑️", key=f"del_e_{i}"):
+                        to_del = i
+            
             if to_del is not None:
                 st.session_state.expense_logs.pop(to_del)
+                st.session_state.edit_mode = {"type": None, "index": None}
                 st.rerun()
 
     # --- VEHICLE DELIVERIES ---
@@ -605,17 +683,55 @@ with nav_tab3:
             st.markdown("#### Existing Delivery Logs")
             to_del = None
             for i, log in enumerate(st.session_state.delivery_logs):
-                col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 2, 2, 2, 1, 1])
-                col1.write(f"📅 {log.get('Date', 'N/A')}")
-                col2.write(f"👤 {log.get('Host', '')}")
-                col3.write(f"🚗 {log.get('Vehicle', '')}")
-                col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
-                col5.write(f"📍 {log.get('Location', '')}")
-                col6.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
-                if col7.button("🗑️", key=f"del_d_{i}"):
-                    to_del = i
+                # EDIT MODE
+                if st.session_state.edit_mode.get("type") == "del" and st.session_state.edit_mode.get("index") == i:
+                    with st.container():
+                        st.write(f"**✏️ Editing Log {i+1}**")
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            e_date = st.date_input("Date", pd.to_datetime(log.get("Date", datetime.now())).date(), key=f"e_dd_{i}")
+                            e_host = st.selectbox("Delivery Host", hosts, index=hosts.index(log.get("Host")) if log.get("Host") in hosts else 0, key=f"e_dh_{i}")
+                            car_opts = [v["name"] for v in vehicle_configs]
+                            e_car = st.selectbox("Vehicle Delivered", car_opts, index=car_opts.index(log.get("Vehicle")) if log.get("Vehicle") in car_opts else 0, key=f"e_dv_{i}")
+                        with ec2:
+                            e_guest = st.selectbox("Related Renter", guest_list, index=guest_list.index(log.get("Guest")) if log.get("Guest") in guest_list else 0, key=f"e_dg_{i}")
+                            e_amt = st.number_input("Delivery Fee ($)", min_value=0.0, value=float(log.get("Amount ($)", 0.0)), step=5.0, key=f"e_da_{i}")
+                            e_loc = st.text_input("Location", log.get("Location", ""), key=f"e_dloc_{i}")
+                        
+                        sc1, sc2 = st.columns([1, 5])
+                        if sc1.button("💾 Save", key=f"e_dsave_{i}"):
+                            st.session_state.delivery_logs[i] = {
+                                "Date": e_date.strftime("%Y-%m-%d"),
+                                "Host": e_host,
+                                "Vehicle": e_car,
+                                "Guest": e_guest,
+                                "Location": e_loc,
+                                "Amount ($)": e_amt
+                            }
+                            st.session_state.edit_mode = {"type": None, "index": None}
+                            st.rerun()
+                        if sc2.button("❌ Cancel", key=f"e_dcancel_{i}"):
+                            st.session_state.edit_mode = {"type": None, "index": None}
+                            st.rerun()
+                        st.markdown("---")
+                # VIEW MODE
+                else:
+                    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 1, 2, 2, 2, 1, 0.5, 0.5])
+                    col1.write(f"📅 {log.get('Date', 'N/A')}")
+                    col2.write(f"👤 {log.get('Host', '')}")
+                    col3.write(f"🚗 {log.get('Vehicle', '')}")
+                    col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
+                    col5.write(f"📍 {log.get('Location', '')}")
+                    col6.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
+                    if col7.button("✏️", key=f"edit_d_{i}"):
+                        st.session_state.edit_mode = {"type": "del", "index": i}
+                        st.rerun()
+                    if col8.button("🗑️", key=f"del_d_{i}"):
+                        to_del = i
+            
             if to_del is not None:
                 st.session_state.delivery_logs.pop(to_del)
+                st.session_state.edit_mode = {"type": None, "index": None}
                 st.rerun()
 
 # ---------------------------------------------------------
