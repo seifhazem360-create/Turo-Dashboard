@@ -141,7 +141,7 @@ with tab1:
 
     if st.session_state.cleaning_logs:
         df_clean = pd.DataFrame(st.session_state.cleaning_logs)
-        st.dataframe(df_clean.style.format({"Amount ($)": "${:,.2f}"}), use_container_width=True)
+        st.dataframe(df_clean, use_container_width=True)
         if st.button("🗑️ Clear All Cleaning Logs"):
             st.session_state.cleaning_logs = []
             st.rerun()
@@ -174,7 +174,7 @@ with tab2:
 
     if st.session_state.expense_logs:
         df_exp = pd.DataFrame(st.session_state.expense_logs)
-        st.dataframe(df_exp.style.format({"Amount ($)": "${:,.2f}"}), use_container_width=True)
+        st.dataframe(df_exp, use_container_width=True)
         if st.button("🗑️ Clear All Expense Logs"):
             st.session_state.expense_logs = []
             st.rerun()
@@ -207,11 +207,10 @@ with tab3:
 
     if st.session_state.delivery_logs:
         df_del = pd.DataFrame(st.session_state.delivery_logs)
-        st.dataframe(df_del.style.format({"Amount ($)": "${:,.2f}"}), use_container_width=True)
+        st.dataframe(df_del, use_container_width=True)
         if st.button("🗑️ Clear All Delivery Logs"):
             st.session_state.delivery_logs = []
             st.rerun()
-
 
 # Function to safely convert Turo currency string to float
 def parse_currency(val):
@@ -307,18 +306,30 @@ if uploaded_file is not None:
         m4.metric(label="Total Logged Expenses", value=f"${sum(l['Amount ($)'] for l in st.session_state.expense_logs):,.2f}")
 
         st.markdown("### 📊 Host Payout Summary")
-        summary_df = pd.DataFrame(totals).T
+        summary_df = pd.DataFrame(totals).T.reset_index()
+        summary_df.rename(columns={"index": "Host Name"}, inplace=True)
+        
         st.dataframe(
-            summary_df.style.format("${:,.2f}")
-            .background_gradient(cmap="Greens", subset=["Net Final Payout"]),
+            summary_df,
+            column_config={
+                "Trip Earnings": st.column_config.NumberColumn(format="$%.2f"),
+                "Cleaning Bonuses": st.column_config.NumberColumn(format="$%.2f"),
+                "Delivery Fees": st.column_config.NumberColumn(format="$%.2f"),
+                "Expenses": st.column_config.NumberColumn(format="$%.2f"),
+                "Net Final Payout": st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True,
             use_container_width=True
         )
 
         st.markdown("### 💵 Earnings Breakdown per Vehicle")
         vehicle_df = pd.DataFrame(list(car_totals.items()), columns=["Vehicle Name", "Total Net Revenue"])
         st.dataframe(
-            vehicle_df.style.format({"Total Net Revenue": "${:,.2f}"})
-            .background_gradient(cmap="Blues", subset=["Total Net Revenue"]),
+            vehicle_df,
+            column_config={
+                "Total Net Revenue": st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True,
             use_container_width=True
         )
 
