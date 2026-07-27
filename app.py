@@ -46,7 +46,6 @@ def save_cloud_state():
     if not supabase:
         return
     try:
-        # Convert trips dataframe to JSON records for cloud storage
         trips_list = []
         if "trips_data" in st.session_state and not st.session_state.trips_data.empty:
             df_temp = st.session_state.trips_data.copy()
@@ -192,8 +191,6 @@ if to_delete is not None:
     st.session_state.vehicles.pop(to_delete)
     save_cloud_state()
     st.rerun()
-
-save_cloud_state()
 
 # ---------------------------------------------------------
 # 2. FILE UPLOADER & DYNAMIC PARSER
