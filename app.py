@@ -21,8 +21,8 @@ st.sidebar.header("🚘 Fleet & Ownership Splits")
 # Initialize default vehicles in session state if missing
 def init_default_vehicles():
     st.session_state.vehicles = [
-        {"id": 0, "name": "Dodge Journey", "splits": {host_a: 36, host_b: 64, host_c: 0}},
-        {"id": 1, "name": "Honda Civic", "splits": {host_a: 0, host_b: 80, host_c: 20}},
+        {"id": 0, "name": "Dodge Journey", "splits": {host_a: 50, host_b: 50, host_c: 0}},
+        {"id": 1, "name": "Kia Forte", "splits": {host_a: 0, host_b: 0, host_c: 100}},
     ]
     st.session_state.next_id = 2
 
@@ -59,11 +59,7 @@ to_delete = None
 for idx, car in enumerate(st.session_state.vehicles):
     car_id = car["id"]
     with st.sidebar.expander(f"🚗 {car['name']}", expanded=False):
-        new_name = st.text_input(
-            "Vehicle Name", 
-            value=car["name"], 
-            key=f"car_name_{car_id}"
-        )
+        new_name = st.text_input("Vehicle Name", value=car["name"], key=f"car_name_{car_id}")
         if new_name != car["name"]:
             car["name"] = new_name
             st.rerun()
@@ -99,7 +95,7 @@ if to_delete is not None:
     st.rerun()
 
 # 2. File Upload Interface
-uploaded_file = st.file_uploader("Drag and drop your Turo Earnings CSV here", type=["csv"])
+uploaded_file = st.file_uploader("Drag and drop your Turo Earnings CSV here", type=["csv", "tsv", "txt"])
 
 # 3. Create Manual Inputs for Cleaning and Expense tracking
 st.write("---")
@@ -116,36 +112,67 @@ with col2:
     expense_amt = st.number_input("Expense Bill Amount ($)", min_value=0.0, value=0.0, step=5.0)
     add_expense = st.checkbox("Deduct expense from final payout?")
 
+# Function to safely convert Turo currency string to float
+def parse_currency(val):
+    if pd.isna(val):
+        return 0.0
+    s = str(val).strip()
+    is_negative = '-' in s
+    s = s.replace('-', '').replace('US$', '').replace('$', '').replace(',', '').strip()
+    try:
+        amount = float(s)
+        return -amount if is_negative else amount
+    except ValueError:
+        return 0.0
+
 # 4. Data Processing Core
 if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file)
+        # Detect delimiter (comma or tab)
+        content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
+        uploaded_file.seek(0)
+        sep = '\t' if '\t' in content.split('\n')[0] else ','
         
+        df = pd.read_csv(uploaded_file, sep=sep, header=None)
+
         totals = {h: {"Trip Earnings": 0.0, "Cleaning Bonuses": 0.0, "Expenses": 0.0, "Net Final Payout": 0.0} for h in hosts}
+        car_totals = {}
 
         for _, row in df.iterrows():
-            vehicle_text = str(row.get('Vehicle', '')).lower()
-            earnings = float(row.get('Earnings', 0.0))
+            if len(row) < 3:
+                continue
+            
+            # Extract vehicle text from column 3 (index 2) or column 4 (index 3)
+            vehicle_text = f"{str(row.iloc[2])} {str(row.iloc[3])}".lower()
+            
+            # Last column always contains the total net payout for the trip
+            earnings = parse_currency(row.iloc[-1])
             
             matched = False
             for v_config in vehicle_configs:
-                if v_config["name"].lower() in vehicle_text and v_config["name"].strip() != "":
+                v_name = v_config["name"].strip()
+                if v_name != "" and v_name.lower() in vehicle_text:
+                    car_totals[v_name] = car_totals.get(v_name, 0.0) + earnings
                     for h, split in v_config["splits"].items():
                         totals[h]["Trip Earnings"] += earnings * split
                     matched = True
                     break
             
-            if not matched:
+            # Fallback if vehicle isn't matched
+            if not matched and earnings != 0:
+                car_totals["Unmatched Vehicles"] = car_totals.get("Unmatched Vehicles", 0.0) + earnings
                 split_even = 1.0 / len(hosts)
                 for h in hosts:
                     totals[h]["Trip Earnings"] += earnings * split_even
 
+        # Process manual items
         if add_clean:
             totals[cleaner]["Cleaning Bonuses"] += clean_bonus
             
         if add_expense:
             totals[payer]["Expenses"] += expense_amt
 
+        # Compute net final payouts
         for h in hosts:
             totals[h]["Net Final Payout"] = (
                 totals[h]["Trip Earnings"] + totals[h]["Cleaning Bonuses"] - totals[h]["Expenses"]
@@ -153,10 +180,16 @@ if uploaded_file is not None:
 
         st.write("---")
         st.success(f"📊 Dashboard Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        st.markdown("### 💵 Total Earnings per Vehicle")
+        vehicle_df = pd.DataFrame(list(car_totals.items()), columns=["Vehicle", "Total Net Earnings"])
+        st.dataframe(vehicle_df.style.format({"Total Net Earnings": "${:,.2f}"}), use_container_width=True)
+
+        st.markdown("### 📊 Host Payout Summary")
         summary_df = pd.DataFrame(totals).T
-        st.dataframe(summary_df.style.format("${:,.2f}"))
+        st.dataframe(summary_df.style.format("${:,.2f}"), use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error reading file structure. Technical details: {e}")
+        st.error(f"Error parsing file structure. Technical details: {e}")
 else:
     st.info("💡 Awaiting Turo CSV file upload to calculate live payouts.")
