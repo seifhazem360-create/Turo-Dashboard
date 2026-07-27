@@ -139,7 +139,11 @@ def parse_date(date_str):
 
 # Process New File Uploads
 if uploaded_file is not None:
-    if st.session_state.uploaded_filename != uploaded_file.name:
+    # Check if file is new OR if the memory is stuck on the old column structure
+    is_new_file = st.session_state.uploaded_filename != uploaded_file.name
+    is_old_structure = not st.session_state.trips_data.empty and "Fees & Deductions" not in st.session_state.trips_data.columns
+
+    if is_new_file or is_old_structure:
         try:
             content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
             uploaded_file.seek(0)
