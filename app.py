@@ -351,52 +351,22 @@ with nav_tab1:
         st.info("💡 Upload a Turo Earnings CSV to view analytics.")
 
 # ---------------------------------------------------------
-# TAB 2: TRIP LEDGER & ITEM INSPECTION
+# TAB 2: TRIP LEDGER & DETAILS
 # ---------------------------------------------------------
 with nav_tab2:
     if not filtered_df.empty:
         st.markdown("### 📑 Master Trip Ledger")
-        
-        # Item Inspection Menu
-        trip_options = ["All Trips (Full Ledger)"] + [
-            f"{row['Guest']} | {row['Vehicle']} ({row['Start Date']})" 
-            for _, row in filtered_df.iterrows()
-        ]
-        
-        selected_trip_label = st.selectbox("🔍 Choose a Trip to Inspect Details", trip_options, index=0)
-        
-        if selected_trip_label == "All Trips (Full Ledger)":
-            st.dataframe(
-                filtered_df[["Guest", "Vehicle", "Start Date", "End Date", "Status", "Trip Earnings", "Extras & Reimbursements", "Fees & Deductions", "Net Total"]],
-                column_config={
-                    "Trip Earnings": st.column_config.NumberColumn(format="$%.2f"),
-                    "Extras & Reimbursements": st.column_config.NumberColumn(format="$%.2f"),
-                    "Fees & Deductions": st.column_config.NumberColumn(format="$%.2f"),
-                    "Net Total": st.column_config.NumberColumn(format="$%.2f"),
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-        else:
-            selected_idx = trip_options.index(selected_trip_label) - 1
-            trip = filtered_df.iloc[selected_idx]
-            
-            st.markdown(f"#### 🧾 Itemized Breakdown: {trip['Guest']}")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Base Trip Earnings", f"${trip['Trip Earnings']:,.2f}")
-            c2.metric("Extras & Reimbursements", f"${trip['Extras & Reimbursements']:,.2f}")
-            c3.metric("Fees / Deductions", f"${trip['Fees & Deductions']:,.2f}")
-            c4.metric("Net Total Payout", f"${trip['Net Total']:,.2f}")
-            
-            st.markdown("---")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.write(f"**Guest Name:** {trip['Guest']}")
-                st.write(f"**Vehicle Assigned:** {trip['Vehicle']}")
-                st.write(f"**Trip Status:** {trip['Status']}")
-            with col_b:
-                st.write(f"**Start Date:** {trip['Start Date']}")
-                st.write(f"**End Date:** {trip['End Date']}")
+        st.dataframe(
+            filtered_df[["Guest", "Vehicle", "Start Date", "End Date", "Status", "Trip Earnings", "Extras & Reimbursements", "Fees & Deductions", "Net Total"]],
+            column_config={
+                "Trip Earnings": st.column_config.NumberColumn(format="$%.2f"),
+                "Extras & Reimbursements": st.column_config.NumberColumn(format="$%.2f"),
+                "Fees & Deductions": st.column_config.NumberColumn(format="$%.2f"),
+                "Net Total": st.column_config.NumberColumn(format="$%.2f"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
 
     else:
         st.info("💡 Awaiting CSV upload to populate trip details.")
