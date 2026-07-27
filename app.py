@@ -18,7 +18,7 @@ hosts = [host_a, host_b, host_c]
 st.sidebar.markdown("---")
 st.sidebar.header("🚘 Fleet & Ownership Splits")
 
-# Initialize default vehicles in session state if missing or outdated
+# Initialize default vehicles in session state if missing
 def init_default_vehicles():
     st.session_state.vehicles = [
         {"id": 0, "name": "Dodge Journey", "splits": {host_a: 36, host_b: 64, host_c: 0}},
@@ -29,7 +29,7 @@ def init_default_vehicles():
 if "vehicles" not in st.session_state:
     init_default_vehicles()
 
-# Ensure all stored vehicles have an 'id' key (prevents KeyError from old sessions)
+# Safely handle old session states without an 'id'
 for idx, car in enumerate(st.session_state.vehicles):
     if "id" not in car:
         car["id"] = idx
@@ -59,7 +59,6 @@ to_delete = None
 for idx, car in enumerate(st.session_state.vehicles):
     car_id = car["id"]
     with st.sidebar.expander(f"🚗 {car['name']}", expanded=False):
-        # Allow editing name and persist immediately to session state
         new_name = st.text_input(
             "Vehicle Name", 
             value=car["name"], 
@@ -82,20 +81,19 @@ for idx, car in enumerate(st.session_state.vehicles):
                 value=default_val, 
                 key=f"split_{car_id}_{h}"
             )
-            car["splits"][h] = val  # Update split in session state
+            car["splits"][h] = val
             splits[h] = val / 100.0
             total_pct += val
         
         if total_pct != 100:
             st.warning(f"⚠️ Total split is currently **{total_pct}%** (should equal 100%).")
         
-        # Delete button for individual car
         if st.button("🗑️ Delete Vehicle", key=f"delete_{car_id}"):
             to_delete = idx
 
         vehicle_configs.append({"name": car["name"], "splits": splits})
 
-# Handle vehicle deletion outside loop to avoid state disruption
+# Handle vehicle deletion
 if to_delete is not None:
     st.session_state.vehicles.pop(to_delete)
     st.rerun()
@@ -123,52 +121,40 @@ if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
         
-        # Initialize calculations
         totals = {h: {"Trip Earnings": 0.0, "Cleaning Bonuses": 0.0, "Expenses": 0.0, "Net Final Payout": 0.0} for h in hosts}
 
-        # Process each row in the Turo CSV
         for _, row in df.iterrows():
             vehicle_text = str(row.get('Vehicle', '')).lower()
             earnings = float(row.get('Earnings', 0.0))
             
             matched = False
             for v_config in vehicle_configs:
-                # Check if the vehicle name matches the CSV row
                 if v_config["name"].lower() in vehicle_text and v_config["name"].strip() != "":
                     for h, split in v_config["splits"].items():
                         totals[h]["Trip Earnings"] += earnings * split
                     matched = True
                     break
             
-            # Fallback split if vehicle doesn't match any listed cars
             if not matched:
                 split_even = 1.0 / len(hosts)
                 for h in hosts:
                     totals[h]["Trip Earnings"] += earnings * split_even
 
-        # Process manual items
         if add_clean:
             totals[cleaner]["Cleaning Bonuses"] += clean_bonus
             
         if add_expense:
             totals[payer]["Expenses"] += expense_amt
 
-        # Compute ultimate payouts
         for h in hosts:
             totals[h]["Net Final Payout"] = (
                 totals[h]["Trip Earnings"] + totals[h]["Cleaning Bonuses"] - totals[h]["Expenses"]
             )
 
-        # Display Live Dashboard
         st.write("---")
         st.success(f"📊 Dashboard Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         summary_df = pd.DataFrame(totals).T
         st.dataframe(summary_df.style.format("${:,.2f}"))
-
-    except Exception as e:
-        st.error(f"Error reading file structure. Technical details: {e}")
-else:
-    st.info("💡 Awaiting Turo CSV file upload to calculate live payouts.")
 
     except Exception as e:
         st.error(f"Error reading file structure. Technical details: {e}")
