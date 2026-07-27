@@ -8,13 +8,20 @@ st.set_page_config(page_title="Multi-Host Turo Fleet Dashboard", page_icon="🚗
 st.title("🚗 Multi-Host Turo Fleet Dashboard")
 st.caption("Upload your Turo CSV to split earnings, track cleaning, manage expenses, and log delivery fees.")
 
-# 1. Sidebar Configurations for custom user names & splits
+# ---------------------------------------------------------
+# 1. SIDEBAR CONFIGURATIONS & SETTINGS
+# ---------------------------------------------------------
 st.sidebar.header("⚙️ Host Configurations")
 host_a = st.sidebar.text_input("Host A Name", "AH")
 host_b = st.sidebar.text_input("Host B Name", "SA")
 host_c = st.sidebar.text_input("Host C Name", "OM")
 
 hosts = [host_a, host_b, host_c]
+
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Task Default Values")
+default_clean_fee = st.sidebar.number_input("Default Cleaning Fee ($)", min_value=0.0, value=25.0, step=5.0)
+default_delivery_fee = st.sidebar.number_input("Default Delivery Fee ($)", min_value=0.0, value=30.0, step=5.0)
 
 st.sidebar.markdown("---")
 st.sidebar.header("🚘 Fleet & Ownership Splits")
@@ -40,7 +47,7 @@ if "expense_logs" not in st.session_state:
 if "delivery_logs" not in st.session_state:
     st.session_state.delivery_logs = []
 
-# Safely handle old session states without an 'id'
+# Ensure all stored vehicles have an 'id'
 for idx, car in enumerate(st.session_state.vehicles):
     if "id" not in car:
         car["id"] = idx
@@ -100,17 +107,20 @@ for idx, car in enumerate(st.session_state.vehicles):
 
         vehicle_configs.append({"name": car["name"], "splits": splits})
 
-# Handle vehicle deletion
 if to_delete is not None:
     st.session_state.vehicles.pop(to_delete)
     st.rerun()
 
-# 2. File Upload Interface
+# ---------------------------------------------------------
+# 2. FILE UPLOADER
+# ---------------------------------------------------------
 uploaded_file = st.file_uploader("📂 Drag and drop your Turo Earnings CSV here", type=["csv", "tsv", "txt"])
 
-# 3. Interactive Task Logs & Manual Inputs
+# ---------------------------------------------------------
+# 3. INTERACTIVE TASK LOGS (WITH INDIVIDUAL DELETION)
+# ---------------------------------------------------------
 st.markdown("---")
-st.subheader("📝 Fleet Activity & Manual Task Logs")
+st.subheader("📝 Fleet Activity & Task Logs")
 
 tab1, tab2, tab3 = st.tabs(["🧼 Cleaning Logs", "💸 Expense Logs", "🚚 Vehicle Delivery Tasks"])
 
@@ -122,7 +132,7 @@ with tab1:
             cleaner = st.selectbox("Who cleaned the vehicle?", hosts)
             clean_car = st.selectbox("Vehicle Cleaned", [v["name"] for v in vehicle_configs] + ["General / Unspecified"])
         with c2:
-            clean_bonus = st.number_input("Cleaning Fee / Bonus ($)", min_value=0.0, value=25.0, step=5.0)
+            clean_bonus = st.number_input("Cleaning Fee ($)", min_value=0.0, value=default_clean_fee, step=5.0)
             clean_date = st.date_input("Date Completed", datetime.now())
         with c3:
             st.write("")
@@ -136,14 +146,22 @@ with tab1:
                 "Vehicle": clean_car,
                 "Amount ($)": clean_bonus
             })
-            st.success(f"Added ${clean_bonus:.2f} cleaning log for {cleaner}!")
+            st.success(f"Logged ${clean_bonus:.2f} cleaning task for {cleaner}!")
             st.rerun()
 
     if st.session_state.cleaning_logs:
-        df_clean = pd.DataFrame(st.session_state.cleaning_logs)
-        st.dataframe(df_clean, use_container_width=True)
-        if st.button("🗑️ Clear All Cleaning Logs"):
-            st.session_state.cleaning_logs = []
+        st.write("### Active Cleaning Tasks")
+        to_del_clean = None
+        for i, log in enumerate(st.session_state.cleaning_logs):
+            lc1, lc2, lc3, lc4, lc5 = st.columns([2, 2, 2, 2, 1])
+            lc1.write(f"📅 {log['Date']}")
+            lc2.write(f"👤 {log['Host']}")
+            lc3.write(f"🚗 {log['Vehicle']}")
+            lc4.write(f"💵 ${log['Amount ($)']:.2f}")
+            if lc5.button("🗑️", key=f"del_clean_{i}"):
+                to_del_clean = i
+        if to_del_clean is not None:
+            st.session_state.cleaning_logs.pop(to_del_clean)
             st.rerun()
 
 # --- TAB 2: Expense Logs ---
@@ -169,14 +187,23 @@ with tab2:
                 "Description": expense_note,
                 "Amount ($)": expense_amt
             })
-            st.success(f"Added ${expense_amt:.2f} expense log for {payer}!")
+            st.success(f"Logged ${expense_amt:.2f} expense for {payer}!")
             st.rerun()
 
     if st.session_state.expense_logs:
-        df_exp = pd.DataFrame(st.session_state.expense_logs)
-        st.dataframe(df_exp, use_container_width=True)
-        if st.button("🗑️ Clear All Expense Logs"):
-            st.session_state.expense_logs = []
+        st.write("### Active Expense Logs")
+        to_del_exp = None
+        for i, log in enumerate(st.session_state.expense_logs):
+            ec1, ec2, ec3, ec4, ec5, ec6 = st.columns([2, 2, 2, 3, 2, 1])
+            ec1.write(f"📅 {log['Date']}")
+            ec2.write(f"👤 {log['Host']}")
+            ec3.write(f"🚗 {log['Vehicle']}")
+            ec4.write(f"📝 {log['Description']}")
+            ec5.write(f"💵 ${log['Amount ($)']:.2f}")
+            if ec6.button("🗑️", key=f"del_exp_{i}"):
+                to_del_exp = i
+        if to_del_exp is not None:
+            st.session_state.expense_logs.pop(to_del_exp)
             st.rerun()
 
 # --- TAB 3: Delivery Logs ---
@@ -184,10 +211,10 @@ with tab3:
     with st.form("delivery_form", clear_on_submit=True):
         d1, d2, d3 = st.columns([2, 2, 1])
         with d1:
-            driver = st.selectbox("Who delivered/dropped off vehicle?", hosts)
+            driver = st.selectbox("Who delivered vehicle?", hosts)
             delivery_car = st.selectbox("Delivered Vehicle", [v["name"] for v in vehicle_configs])
         with d2:
-            delivery_amt = st.number_input("Delivery Fee Earned ($)", min_value=0.0, value=30.0, step=5.0)
+            delivery_amt = st.number_input("Delivery Fee ($)", min_value=0.0, value=default_delivery_fee, step=5.0)
             delivery_loc = st.text_input("Delivery Location", "Airport / Custom Address")
         with d3:
             st.write("")
@@ -202,17 +229,26 @@ with tab3:
                 "Location": delivery_loc,
                 "Amount ($)": delivery_amt
             })
-            st.success(f"Added ${delivery_amt:.2f} delivery fee for {driver}!")
+            st.success(f"Logged ${delivery_amt:.2f} delivery task for {driver}!")
             st.rerun()
 
     if st.session_state.delivery_logs:
-        df_del = pd.DataFrame(st.session_state.delivery_logs)
-        st.dataframe(df_del, use_container_width=True)
-        if st.button("🗑️ Clear All Delivery Logs"):
-            st.session_state.delivery_logs = []
+        st.write("### Active Delivery Tasks")
+        to_del_del = None
+        for i, log in enumerate(st.session_state.delivery_logs):
+            dc1, dc2, dc3, dc4, dc5, dc6 = st.columns([2, 2, 2, 3, 2, 1])
+            dc1.write(f"📅 {log['Date']}")
+            dc2.write(f"👤 {log['Host']}")
+            dc3.write(f"🚗 {log['Vehicle']}")
+            dc4.write(f"📍 {log['Location']}")
+            dc5.write(f"💵 ${log['Amount ($)']:.2f}")
+            if dc6.button("🗑️", key=f"del_del_{i}"):
+                to_del_del = i
+        if to_del_del is not None:
+            st.session_state.delivery_logs.pop(to_del_del)
             st.rerun()
 
-# Function to safely convert Turo currency string to float
+# Helper function to parse currency
 def parse_currency(val):
     if pd.isna(val):
         return 0.0
@@ -225,7 +261,9 @@ def parse_currency(val):
     except ValueError:
         return 0.0
 
-# 4. Data Processing & Dashboard Display
+# ---------------------------------------------------------
+# 4. DATA PROCESSING & ANALYTICS DASHBOARD
+# ---------------------------------------------------------
 if uploaded_file is not None:
     try:
         content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
@@ -234,106 +272,169 @@ if uploaded_file is not None:
         
         df = pd.read_csv(uploaded_file, sep=sep, header=None)
 
-        totals = {
+        # Parse detailed rows for CSV table
+        detailed_trips = []
+        car_analytics = {}
+        total_fleet_gross = 0.0
+
+        # Totals per host
+        host_totals = {
             h: {
-                "Trip Earnings": 0.0, 
-                "Cleaning Bonuses": 0.0, 
-                "Delivery Fees": 0.0, 
-                "Expenses": 0.0, 
-                "Net Final Payout": 0.0
+                "Pool Split Earnings": 0.0,
+                "Cleaning Earned": 0.0,
+                "Delivery Earned": 0.0,
+                "Expenses Reimbursed": 0.0,
+                "Net Final Payout": 0.0,
+                "Total Tasks Done": 0
             } for h in hosts
         }
-        car_totals = {}
-        total_fleet_raw = 0.0
 
-        for _, row in df.iterrows():
-            if len(row) < 3:
-                continue
-            
-            vehicle_text = f"{str(row.iloc[2])} {str(row.iloc[3])}".lower()
-            earnings = parse_currency(row.iloc[-1])
-            total_fleet_raw += earnings
-            
-            matched = False
-            for v_config in vehicle_configs:
-                v_name = v_config["name"].strip()
-                if v_name != "" and v_name.lower() in vehicle_text:
-                    car_totals[v_name] = car_totals.get(v_name, 0.0) + earnings
-                    for h, split in v_config["splits"].items():
-                        totals[h]["Trip Earnings"] += earnings * split
-                    matched = True
-                    break
-            
-            if not matched and earnings != 0:
-                car_totals["Unmatched Vehicles"] = car_totals.get("Unmatched Vehicles", 0.0) + earnings
-                split_even = 1.0 / len(hosts)
-                for h in hosts:
-                    totals[h]["Trip Earnings"] += earnings * split_even
-
-        # Sum up interactive logs
+        # Calculate Tasks Completed Count
         for log in st.session_state.cleaning_logs:
-            if log["Host"] in totals:
-                totals[log["Host"]]["Cleaning Bonuses"] += log["Amount ($)"]
+            if log["Host"] in host_totals:
+                host_totals[log["Host"]]["Total Tasks Done"] += 1
+                host_totals[log["Host"]]["Cleaning Earned"] += log["Amount ($)"]
 
         for log in st.session_state.delivery_logs:
-            if log["Host"] in totals:
-                totals[log["Host"]]["Delivery Fees"] += log["Amount ($)"]
+            if log["Host"] in host_totals:
+                host_totals[log["Host"]]["Total Tasks Done"] += 1
+                host_totals[log["Host"]]["Delivery Earned"] += log["Amount ($)"]
 
         for log in st.session_state.expense_logs:
-            if log["Host"] in totals:
-                totals[log["Host"]]["Expenses"] += log["Amount ($)"]
+            if log["Host"] in host_totals:
+                host_totals[log["Host"]]["Expenses Reimbursed"] += log["Amount ($)"]
 
-        # Compute net final payouts
+        total_task_costs = (
+            sum(l["Amount ($)"] for l in st.session_state.cleaning_logs) +
+            sum(l["Amount ($)"] for l in st.session_state.delivery_logs) +
+            sum(l["Amount ($)"] for l in st.session_state.expense_logs)
+        )
+
+        # Process each trip
+        for idx, row in df.iterrows():
+            if len(row) < 10:
+                continue
+            
+            guest_name = str(row.iloc[1])
+            vehicle_text = f"{str(row.iloc[2])} {str(row.iloc[3])}".lower()
+            trip_status = str(row.iloc[10])
+            
+            # Extract financial details safely
+            trip_earnings = parse_currency(row.iloc[15]) if len(row) > 15 else 0.0
+            extras = parse_currency(row.iloc[27]) if len(row) > 27 else 0.0
+            reimbursements = parse_currency(row.iloc[29]) if len(row) > 29 else 0.0
+            total_net = parse_currency(row.iloc[-1])
+            
+            total_fleet_gross += total_net
+            
+            # Identify car
+            matched_car = "Unmatched Vehicles"
+            car_splits = {h: 1.0 / len(hosts) for h in hosts}
+            
+            for v_config in vehicle_configs:
+                if v_config["name"].lower() in vehicle_text and v_config["name"].strip() != "":
+                    matched_car = v_config["name"]
+                    car_splits = v_config["splits"]
+                    break
+
+            if matched_car not in car_analytics:
+                car_analytics[matched_car] = {"Trips": 0, "Gross Revenue": 0.0}
+            
+            car_analytics[matched_car]["Trips"] += 1
+            car_analytics[matched_car]["Gross Revenue"] += total_net
+
+            detailed_trips.append({
+                "Guest Name": guest_name,
+                "Vehicle": matched_car,
+                "Status": trip_status,
+                "Trip Earnings ($)": trip_earnings,
+                "Extras ($)": extras,
+                "Reimbursements ($)": reimbursements,
+                "Net Total ($)": total_net
+            })
+
+            # Distribute earnings logic: Pool = Gross - Tasks/Expenses
+            pool_for_trip = total_net
+            for h, split in car_splits.items():
+                host_totals[h]["Pool Split Earnings"] += pool_for_trip * split
+
+        # Adjust Pool split: Deduct tasks/expenses from the overall pool proportionally or evenly
+        if total_fleet_gross > 0 and total_task_costs > 0:
+            task_deduction_per_host = total_task_costs / len(hosts)
+            for h in hosts:
+                host_totals[h]["Pool Split Earnings"] -= task_deduction_per_host
+
+        # Calculate Net Final Payouts
         total_net_payouts = 0.0
         for h in hosts:
             net = (
-                totals[h]["Trip Earnings"] 
-                + totals[h]["Cleaning Bonuses"] 
-                + totals[h]["Delivery Fees"] 
-                - totals[h]["Expenses"]
+                host_totals[h]["Pool Split Earnings"] +
+                host_totals[h]["Cleaning Earned"] +
+                host_totals[h]["Delivery Earned"] +
+                host_totals[h]["Expenses Reimbursed"]
             )
-            totals[h]["Net Final Payout"] = net
+            host_totals[h]["Net Final Payout"] = net
             total_net_payouts += net
 
+        # ---------------------------------------------------------
+        # DISPLAY PERFORMANCE METRICS & DASHBOARD
+        # ---------------------------------------------------------
         st.markdown("---")
         st.subheader("📈 Performance Overview & Big Metrics")
         
-        # High-Impact KPI Displays
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric(label="Total Fleet Gross Earnings", value=f"${total_fleet_raw:,.2f}")
+        m1.metric(label="Total Fleet Gross Earnings", value=f"${total_fleet_gross:,.2f}")
         m2.metric(label="Total Net Host Payouts", value=f"${total_net_payouts:,.2f}")
-        m3.metric(label="Active Cleaning Bonuses", value=f"${sum(l['Amount ($)'] for l in st.session_state.cleaning_logs):,.2f}")
-        m4.metric(label="Total Logged Expenses", value=f"${sum(l['Amount ($)'] for l in st.session_state.expense_logs):,.2f}")
+        m3.metric(label="Deducted Task & Expense Pool", value=f"${total_task_costs:,.2f}")
+        m4.metric(label="Total Fleet Trips", value=len(detailed_trips))
 
-        st.markdown("### 📊 Host Payout Summary")
-        summary_df = pd.DataFrame(totals).T.reset_index()
-        summary_df.rename(columns={"index": "Host Name"}, inplace=True)
-        
+        st.markdown("### 🏎️ Vehicle Performance Summary")
+        car_df = pd.DataFrame([
+            {"Vehicle": k, "Completed Trips": v["Trips"], "Gross Revenue": v["Gross Revenue"]}
+            for k, v in car_analytics.items()
+        ])
         st.dataframe(
-            summary_df,
+            car_df,
             column_config={
-                "Trip Earnings": st.column_config.NumberColumn(format="$%.2f"),
-                "Cleaning Bonuses": st.column_config.NumberColumn(format="$%.2f"),
-                "Delivery Fees": st.column_config.NumberColumn(format="$%.2f"),
-                "Expenses": st.column_config.NumberColumn(format="$%.2f"),
-                "Net Final Payout": st.column_config.NumberColumn(format="$%.2f"),
+                "Gross Revenue": st.column_config.NumberColumn(format="$%.2f"),
             },
             hide_index=True,
             use_container_width=True
         )
 
-        st.markdown("### 💵 Earnings Breakdown per Vehicle")
-        vehicle_df = pd.DataFrame(list(car_totals.items()), columns=["Vehicle Name", "Total Net Revenue"])
+        st.markdown("### 📊 Host Payout & Task Summary")
+        summary_df = pd.DataFrame(host_totals).T.reset_index()
+        summary_df.rename(columns={"index": "Host Name"}, inplace=True)
+        
         st.dataframe(
-            vehicle_df,
+            summary_df,
             column_config={
-                "Total Net Revenue": st.column_config.NumberColumn(format="$%.2f"),
+                "Pool Split Earnings": st.column_config.NumberColumn(format="$%.2f"),
+                "Cleaning Earned": st.column_config.NumberColumn(format="$%.2f"),
+                "Delivery Earned": st.column_config.NumberColumn(format="$%.2f"),
+                "Expenses Reimbursed": st.column_config.NumberColumn(format="$%.2f"),
+                "Net Final Payout": st.column_config.NumberColumn(format="$%.2f"),
+                "Total Tasks Done": st.column_config.NumberColumn(format="%d Tasks"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
+        st.markdown("### 📑 Detailed Trip & Reimbursement Export")
+        trips_df = pd.DataFrame(detailed_trips)
+        st.dataframe(
+            trips_df,
+            column_config={
+                "Trip Earnings ($)": st.column_config.NumberColumn(format="$%.2f"),
+                "Extras ($)": st.column_config.NumberColumn(format="$%.2f"),
+                "Reimbursements ($)": st.column_config.NumberColumn(format="$%.2f"),
+                "Net Total ($)": st.column_config.NumberColumn(format="$%.2f"),
             },
             hide_index=True,
             use_container_width=True
         )
 
     except Exception as e:
-        st.error(f"Error parsing file structure. Technical details: {e}")
+        st.error(f"Error processing file. Technical details: {e}")
 else:
     st.info("💡 Awaiting Turo CSV file upload to calculate live payouts.")
