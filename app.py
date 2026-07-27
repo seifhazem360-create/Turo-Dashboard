@@ -57,7 +57,7 @@ def load_cloud_state():
 
 def save_cloud_state():
     if not supabase:
-        return False
+        return False, "Supabase client not initialized."
     try:
         trips_list = []
         if "trips_data" in st.session_state and not st.session_state.trips_data.empty:
@@ -82,14 +82,12 @@ def save_cloud_state():
             "uploaded_filename": st.session_state.get("uploaded_filename", None)
         }
         
-        # Clean all NaNs out of dictionaries and lists
         state_payload = clean_for_json(raw_payload)
 
-        supabase.table("app_state").upsert({"id": 1, "data": state_payload}).execute()
-        return True
+        supabase.table("app_state").upsert({"id": 1, "data": state_payload}, on_conflict="id").execute()
+        return True, ""
     except Exception as e:
-        print(f"Error saving cloud state: {e}")
-        return False
+        return False, str(e)
 
 # Load state from cloud once at startup
 if "cloud_loaded" not in st.session_state:
@@ -122,10 +120,11 @@ if "cloud_loaded" not in st.session_state:
 # ---------------------------------------------------------
 st.sidebar.header("☁️ Cloud Sync Control")
 if st.sidebar.button("💾 Save All Data & Trips to Cloud", type="primary"):
-    if save_cloud_state():
+    success, err_msg = save_cloud_state()
+    if success:
         st.sidebar.success("✅ Successfully saved to cloud!")
     else:
-        st.sidebar.error("❌ Failed to save to cloud.")
+        st.sidebar.error(f"❌ Failed: {err_msg}")
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Host Configuration")
