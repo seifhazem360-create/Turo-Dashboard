@@ -21,35 +21,70 @@ st.sidebar.header("🚘 Fleet & Ownership Splits")
 # Initialize default vehicles in session state if not already present
 if "vehicles" not in st.session_state:
     st.session_state.vehicles = [
-        {"name": "Tesla Model 3", "splits": {host_a: 36, host_b: 64, host_c: 0}},
-        {"name": "Honda Civic", "splits": {host_a: 0, host_b: 80, host_c: 20}},
+        {"id": 0, "name": "Dodge Journey", "splits": {host_a: 36, host_b: 64, host_c: 0}},
+        {"id": 1, "name": "Honda Civic", "splits": {host_a: 0, host_b: 80, host_c: 20}},
     ]
+
+# Track highest assigned ID for unique key generation
+if "next_id" not in st.session_state:
+    st.session_state.next_id = len(st.session_state.vehicles)
 
 # Button to dynamically add a new car
 if st.sidebar.button("➕ Add New Vehicle"):
+    new_id = st.session_state.next_id
     st.session_state.vehicles.append(
-        {"name": f"Vehicle {len(st.session_state.vehicles) + 1}", "splits": {host_a: 33, host_b: 33, host_c: 34}}
+        {"id": new_id, "name": f"Vehicle {new_id + 1}", "splits": {host_a: 33, host_b: 33, host_c: 34}}
     )
+    st.session_state.next_id += 1
+    st.rerun()
 
 # Render controls for each vehicle
 vehicle_configs = []
+to_delete = None
+
 for idx, car in enumerate(st.session_state.vehicles):
-    with st.sidebar.expander(f"🚗 {car['name']}", expanded=True):
-        car_name = st.text_input(f"Vehicle Name #{idx+1}", value=car["name"], key=f"car_name_{idx}")
+    car_id = car["id"]
+    with st.sidebar.expander(f"🚗 {car['name']}", expanded=False):
+        # Allow editing name and persist immediately to session state
+        new_name = st.text_input(
+            "Vehicle Name", 
+            value=car["name"], 
+            key=f"car_name_{car_id}"
+        )
+        if new_name != car["name"]:
+            car["name"] = new_name
+            st.rerun()
+
         st.markdown("**Host Equity / Split %**")
         
         splits = {}
         total_pct = 0
         for h in hosts:
             default_val = car["splits"].get(h, 0)
-            val = st.number_input(f"{h} Cut %", min_value=0, max_value=100, value=default_val, key=f"split_{idx}_{h}")
+            val = st.number_input(
+                f"{h} Cut %", 
+                min_value=0, 
+                max_value=100, 
+                value=default_val, 
+                key=f"split_{car_id}_{h}"
+            )
+            car["splits"][h] = val  # Update split in session state
             splits[h] = val / 100.0
             total_pct += val
         
         if total_pct != 100:
             st.warning(f"⚠️ Total split is currently **{total_pct}%** (should equal 100%).")
         
-        vehicle_configs.append({"name": car_name, "splits": splits})
+        # Delete button for individual car
+        if st.button("🗑️ Delete Vehicle", key=f"delete_{car_id}"):
+            to_delete = idx
+
+        vehicle_configs.append({"name": car["name"], "splits": splits})
+
+# Handle vehicle deletion outside loop to avoid state disruption
+if to_delete is not None:
+    st.session_state.vehicles.pop(to_delete)
+    st.rerun()
 
 # 2. File Upload Interface
 uploaded_file = st.file_uploader("Drag and drop your Turo Earnings CSV here", type=["csv"])
