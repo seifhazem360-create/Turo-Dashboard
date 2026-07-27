@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import json
 
 # Page Configuration
 st.set_page_config(page_title="Fleet Command | Turo Fleet Dashboard", page_icon="🚗", layout="wide")
@@ -115,6 +116,41 @@ if to_delete is not None:
     st.rerun()
 
 # ---------------------------------------------------------
+# GLOBAL BACKUP & SAVE SYSTEM (SIDEBAR)
+# ---------------------------------------------------------
+st.sidebar.markdown("---")
+st.sidebar.header("💾 Global State Backup")
+
+# Compile state dictionary for export
+state_backup = {
+    "vehicles": st.session_state.vehicles,
+    "cleaning_logs": st.session_state.cleaning_logs,
+    "expense_logs": st.session_state.expense_logs,
+    "delivery_logs": st.session_state.delivery_logs,
+}
+backup_json = json.dumps(state_backup, indent=4)
+
+st.sidebar.download_button(
+    label="📥 Download Session Backup",
+    data=backup_json,
+    file_name=f"fleet_backup_{datetime.now().strftime('%Y%m%d')}.json",
+    mime="application/json",
+)
+
+uploaded_backup = st.sidebar.file_uploader("📤 Restore Session Backup", type=["json"])
+if uploaded_backup is not None:
+    try:
+        restored_data = json.load(uploaded_backup)
+        st.session_state.vehicles = restored_data.get("vehicles", st.session_state.vehicles)
+        st.session_state.cleaning_logs = restored_data.get("cleaning_logs", [])
+        st.session_state.expense_logs = restored_data.get("expense_logs", [])
+        st.session_state.delivery_logs = restored_data.get("delivery_logs", [])
+        st.sidebar.success("✅ Backup restored successfully!")
+        st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"Error loading backup: {e}")
+
+# ---------------------------------------------------------
 # 2. FILE UPLOADER & DYNAMIC PARSER
 # ---------------------------------------------------------
 uploaded_file = st.file_uploader("📂 Upload Turo Earnings File (CSV / TSV)", type=["csv", "tsv", "txt"])
@@ -139,7 +175,6 @@ def parse_date(date_str):
 
 # Process New File Uploads
 if uploaded_file is not None:
-    # Check if file is new OR if the memory is stuck on the old column structure
     is_new_file = st.session_state.uploaded_filename != uploaded_file.name
     is_old_structure = not st.session_state.trips_data.empty and "Fees & Deductions" not in st.session_state.trips_data.columns
 
@@ -164,7 +199,6 @@ if uploaded_file is not None:
                 trip_earnings = parse_currency(row.iloc[15]) if len(row) > 15 else 0.0
                 net_total = parse_currency(row.iloc[-1])
                 
-                # Dynamic scan for ALL reimbursements and deductions across the entire row
                 pos_reimbursements = 0.0
                 neg_deductions = 0.0
                 if len(row) > 16:
@@ -263,7 +297,6 @@ with nav_tab1:
             } for h in hosts
         }
 
-        # Calculate Task Costs per Vehicle
         vehicle_task_deductions = {}
         for log in st.session_state.cleaning_logs:
             v = log["Vehicle"]
@@ -367,7 +400,6 @@ with nav_tab2:
             hide_index=True,
             use_container_width=True
         )
-
     else:
         st.info("💡 Awaiting CSV upload to populate trip details.")
 
