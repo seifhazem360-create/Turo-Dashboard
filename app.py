@@ -44,7 +44,7 @@ def load_cloud_state():
 
 def save_cloud_state():
     if not supabase:
-        return
+        return False
     try:
         trips_list = []
         if "trips_data" in st.session_state and not st.session_state.trips_data.empty:
@@ -68,8 +68,10 @@ def save_cloud_state():
             "uploaded_filename": st.session_state.get("uploaded_filename", None)
         }
         supabase.table("app_state").upsert({"id": 1, "data": state_payload}).execute()
+        return True
     except Exception as e:
         print(f"Error saving cloud state: {e}")
+        return False
 
 # Load state from cloud once at startup
 if "cloud_loaded" not in st.session_state:
@@ -100,6 +102,14 @@ if "cloud_loaded" not in st.session_state:
 # ---------------------------------------------------------
 # 1. SIDEBAR CONFIGURATIONS & DEFAULTS
 # ---------------------------------------------------------
+st.sidebar.header("☁️ Cloud Sync Control")
+if st.sidebar.button("💾 Save All Data & Trips to Cloud", type="primary"):
+    if save_cloud_state():
+        st.sidebar.success("✅ Successfully saved to cloud!")
+    else:
+        st.sidebar.error("❌ Failed to save to cloud.")
+
+st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Host Configuration")
 host_a = st.sidebar.text_input("Host A Name", key="host_a_val")
 host_b = st.sidebar.text_input("Host B Name", key="host_b_val")
@@ -139,13 +149,11 @@ with col_add:
             {"id": new_id, "name": f"Vehicle {new_id + 1}", "splits": {host_a: 33, host_b: 33, host_c: 34}}
         )
         st.session_state.next_id += 1
-        save_cloud_state()
         st.rerun()
 
 with col_reset:
     if st.sidebar.button("🔄 Reset Fleet"):
         st.session_state.vehicles = init_default_vehicles()
-        save_cloud_state()
         st.rerun()
 
 vehicle_configs = []
@@ -157,7 +165,6 @@ for idx, car in enumerate(st.session_state.vehicles):
         new_name = st.text_input("Vehicle Name", value=car["name"], key=f"car_name_{car_id}")
         if new_name != car["name"]:
             car["name"] = new_name
-            save_cloud_state()
             st.rerun()
 
         st.markdown("**Host Split Shares %**")
@@ -180,11 +187,7 @@ for idx, car in enumerate(st.session_state.vehicles):
 
 if to_delete is not None:
     st.session_state.vehicles.pop(to_delete)
-    save_cloud_state()
     st.rerun()
-
-# Automatically save sidebar/host changes to cloud
-save_cloud_state()
 
 # ---------------------------------------------------------
 # 2. FILE UPLOADER & DYNAMIC PARSER
@@ -268,7 +271,6 @@ if uploaded_file is not None:
 
             new_df = pd.DataFrame(parsed_trips)
             
-            # Merge with existing trips if file is updated incrementally
             if not st.session_state.trips_data.empty and is_new_file:
                 combined_df = pd.concat([st.session_state.trips_data, new_df]).drop_duplicates(subset=["Guest", "Start Date", "Net Total"], keep="last")
                 st.session_state.trips_data = combined_df
@@ -276,8 +278,7 @@ if uploaded_file is not None:
                 st.session_state.trips_data = new_df
 
             st.session_state.uploaded_filename = uploaded_file.name
-            save_cloud_state()
-            st.success("✅ File processed and synced to cloud!")
+            st.success("✅ File processed! Click 'Save All Data & Trips to Cloud' in the sidebar to persist.")
         except Exception as e:
             st.error(f"Error parsing uploaded file: {e}")
 
@@ -424,7 +425,7 @@ with nav_tab1:
         )
 
     else:
-        st.info("💡 Upload a Turo Earnings CSV to view analytics.")
+        st.info("💡 Upload a Turo Earnings CSV and click **Save All Data & Trips to Cloud** in the sidebar.")
 
 # ---------------------------------------------------------
 # TAB 2: TRIP LEDGER & DETAILS
