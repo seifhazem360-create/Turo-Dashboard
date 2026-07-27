@@ -85,7 +85,6 @@ def save_cloud_state():
         }
         
         state_payload = clean_for_json(raw_payload)
-
         supabase.table("app_state").upsert({"id": 1, "data": state_payload}, on_conflict="id").execute()
         return True, ""
     except Exception as e:
@@ -302,6 +301,14 @@ if uploaded_file is not None:
             st.error(f"Error parsing uploaded file: {e}")
 
 # ---------------------------------------------------------
+# Dynamic Guest List Builder
+# ---------------------------------------------------------
+guest_list = ["General / Unspecified"]
+if not st.session_state.trips_data.empty and "Guest" in st.session_state.trips_data.columns:
+    guests = sorted([str(g) for g in st.session_state.trips_data["Guest"].dropna().unique() if str(g).strip()])
+    guest_list.extend(guests)
+
+# ---------------------------------------------------------
 # 3. MAIN NAVIGATION TABS
 # ---------------------------------------------------------
 nav_tab1, nav_tab2, nav_tab3, nav_tab4 = st.tabs([
@@ -361,30 +368,44 @@ with nav_tab1:
         }
 
         vehicle_task_deductions = {}
+        
+        # Tally Cleaning Logs
         for log in st.session_state.cleaning_logs:
-            v = log["Vehicle"]
-            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + log["Amount ($)"]
-            if log["Host"] in host_totals:
-                host_totals[log["Host"]]["Tasks Completed"] += 1
-                host_totals[log["Host"]]["Cleaning Earned"] += log["Amount ($)"]
+            v = log.get("Vehicle", "General / Unspecified")
+            amt = log.get("Amount ($)", 0.0)
+            host = log.get("Host")
+            
+            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + amt
+            if host in host_totals:
+                host_totals[host]["Tasks Completed"] += 1
+                host_totals[host]["Cleaning Earned"] += amt
 
+        # Tally Delivery Logs
         for log in st.session_state.delivery_logs:
-            v = log["Vehicle"]
-            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + log["Amount ($)"]
-            if log["Host"] in host_totals:
-                host_totals[log["Host"]]["Tasks Completed"] += 1
-                host_totals[log["Host"]]["Delivery Earned"] += log["Amount ($)"]
+            v = log.get("Vehicle", "General / Unspecified")
+            amt = log.get("Amount ($)", 0.0)
+            host = log.get("Host")
+            
+            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + amt
+            if host in host_totals:
+                host_totals[host]["Tasks Completed"] += 1
+                host_totals[host]["Delivery Earned"] += amt
 
+        # Tally Expense Logs
         for log in st.session_state.expense_logs:
-            v = log["Vehicle"]
-            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + log["Amount ($)"]
-            if log["Host"] in host_totals:
-                host_totals[log["Host"]]["Expenses Reimbursed"] += log["Amount ($)"]
+            v = log.get("Vehicle", "General / Unspecified")
+            amt = log.get("Amount ($)", 0.0)
+            host = log.get("Host")
+            
+            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + amt
+            if host in host_totals:
+                host_totals[host]["Expenses Reimbursed"] += amt
 
         total_tasks_cost = sum(vehicle_task_deductions.values())
 
         vehicle_gross_totals = filtered_df.groupby("Vehicle")["Net Total"].sum().to_dict()
         
+        # Calculate pool split earnings per vehicle
         for v_config in vehicle_configs:
             v_name = v_config["name"]
             v_gross = vehicle_gross_totals.get(v_name, 0.0)
@@ -395,11 +416,13 @@ with nav_tab1:
                 if h in host_totals:
                     host_totals[h]["Pool Split Earnings"] += v_net_pool * pct
 
+        # Deduct general unspecified expenses proportionally from the pool
         general_deduction = vehicle_task_deductions.get("General Fleet", 0.0) + vehicle_task_deductions.get("General / Unspecified", 0.0)
         if general_deduction > 0:
             for h in hosts:
                 host_totals[h]["Pool Split Earnings"] -= (general_deduction / len(hosts))
 
+        # Calculate Final Net
         for h in hosts:
             host_totals[h]["Net Final Payout"] = (
                 host_totals[h]["Pool Split Earnings"] +
@@ -426,6 +449,7 @@ with nav_tab1:
                 "Delivery Earned": st.column_config.NumberColumn(format="$%.2f"),
                 "Expenses Reimbursed": st.column_config.NumberColumn(format="$%.2f"),
                 "Net Final Payout": st.column_config.NumberColumn(format="$%.2f"),
+                "Tasks Completed": st.column_config.NumberColumn(format="%d"),
             },
             hide_index=True,
             use_container_width=True
@@ -438,6 +462,7 @@ with nav_tab1:
             car_perf,
             column_config={
                 "Gross Revenue": st.column_config.NumberColumn(format="$%.2f"),
+                "Trips": st.column_config.NumberColumn(format="%d")
             },
             hide_index=True,
             use_container_width=True
@@ -473,107 +498,124 @@ with nav_tab3:
     st.markdown("### 📝 Active Operational Logs")
     t1, t2, t3 = st.tabs(["🧼 Cleaning Tasks", "💸 Out-of-Pocket Expenses", "🚚 Vehicle Deliveries"])
 
+    # --- CLEANING TASKS ---
     with t1:
-        cleaner = st.selectbox("Host Cleaner", hosts, key="cleaner_input")
-        clean_car = st.selectbox("Vehicle", [v["name"] for v in vehicle_configs] + ["General / Unspecified"], key="clean_car_input")
-        clean_fee = st.number_input("Cleaning Fee ($)", min_value=0.0, value=float(default_clean_fee), step=5.0, key="clean_amt_input")
-        clean_d = st.date_input("Date", datetime.now(), key="clean_date_input")
+        c1, c2 = st.columns(2)
+        with c1:
+            cleaner = st.selectbox("Host Cleaner", hosts, key="cleaner_input")
+            clean_car = st.selectbox("Vehicle", [v["name"] for v in vehicle_configs] + ["General / Unspecified"], key="clean_car_input")
+            clean_d = st.date_input("Date", datetime.now(), key="clean_date_input")
+        with c2:
+            clean_guest = st.selectbox("Related Renter (Guest)", guest_list, key="clean_guest_input")
+            clean_fee = st.number_input("Cleaning Fee ($)", min_value=0.0, value=float(default_clean_fee), step=5.0, key="clean_amt_input")
 
         if st.button("➕ Log Cleaning"):
             st.session_state.cleaning_logs.append({
                 "Date": clean_d.strftime("%Y-%m-%d"),
                 "Host": cleaner,
                 "Vehicle": clean_car,
+                "Guest": clean_guest,
                 "Amount ($)": clean_fee
             })
-            save_cloud_state()
-            st.success("✅ Cleaning task logged and saved to cloud!")
+            st.success("✅ Cleaning task logged! (Click 'Save All Data' in sidebar to persist)")
             st.rerun()
 
         if st.session_state.cleaning_logs:
             st.markdown("#### Existing Cleaning Logs")
             to_del = None
             for i, log in enumerate(st.session_state.cleaning_logs):
-                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
-                col1.write(f"📅 {log['Date']}")
-                col2.write(f"👤 {log['Host']}")
-                col3.write(f"🚗 {log['Vehicle']}")
-                col4.write(f"💵 ${log['Amount ($)']:.2f}")
-                if col5.button("🗑️", key=f"del_c_{i}"):
+                col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 2, 2, 1, 1])
+                col1.write(f"📅 {log.get('Date', 'N/A')}")
+                col2.write(f"👤 {log.get('Host', '')}")
+                col3.write(f"🚗 {log.get('Vehicle', '')}")
+                col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
+                col5.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
+                if col6.button("🗑️", key=f"del_c_{i}"):
                     to_del = i
             if to_del is not None:
                 st.session_state.cleaning_logs.pop(to_del)
-                save_cloud_state()
                 st.rerun()
 
+    # --- EXPENSES ---
     with t2:
-        payer = st.selectbox("Payer Host", hosts, key="payer_input")
-        exp_car = st.selectbox("Vehicle", [v["name"] for v in vehicle_configs] + ["General Fleet"], key="exp_car_input")
-        exp_amt = st.number_input("Expense ($)", min_value=0.0, value=0.0, step=5.0, key="exp_amt_input")
-        exp_desc = st.text_input("Description", "Gas / Tolls / Maintenance", key="exp_desc_input")
+        e1, e2 = st.columns(2)
+        with e1:
+            payer = st.selectbox("Payer Host", hosts, key="payer_input")
+            exp_car = st.selectbox("Vehicle", [v["name"] for v in vehicle_configs] + ["General Fleet"], key="exp_car_input")
+            exp_d = st.date_input("Date", datetime.now(), key="exp_date_input")
+        with e2:
+            exp_guest = st.selectbox("Related Renter (Guest)", guest_list, key="exp_guest_input")
+            exp_amt = st.number_input("Expense ($)", min_value=0.0, value=0.0, step=5.0, key="exp_amt_input")
+            exp_desc = st.text_input("Description", "Gas / Tolls / Maintenance", key="exp_desc_input")
 
         if st.button("➕ Log Expense") and exp_amt > 0:
             st.session_state.expense_logs.append({
-                "Date": datetime.now().strftime("%Y-%m-%d"),
+                "Date": exp_d.strftime("%Y-%m-%d"),
                 "Host": payer,
                 "Vehicle": exp_car,
+                "Guest": exp_guest,
                 "Description": exp_desc,
                 "Amount ($)": exp_amt
             })
-            save_cloud_state()
-            st.success("✅ Expense logged and saved to cloud!")
+            st.success("✅ Expense logged! (Click 'Save All Data' in sidebar to persist)")
             st.rerun()
 
         if st.session_state.expense_logs:
             st.markdown("#### Existing Expense Logs")
             to_del = None
             for i, log in enumerate(st.session_state.expense_logs):
-                col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 3, 2, 1])
-                col1.write(f"📅 {log['Date']}")
-                col2.write(f"👤 {log['Host']}")
-                col3.write(f"🚗 {log['Vehicle']}")
-                col4.write(f"📝 {log['Description']}")
-                col5.write(f"💵 ${log['Amount ($)']:.2f}")
-                if col6.button("🗑️", key=f"del_e_{i}"):
+                col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 2, 2, 2, 1, 1])
+                col1.write(f"📅 {log.get('Date', 'N/A')}")
+                col2.write(f"👤 {log.get('Host', '')}")
+                col3.write(f"🚗 {log.get('Vehicle', '')}")
+                col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
+                col5.write(f"📝 {log.get('Description', '')}")
+                col6.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
+                if col7.button("🗑️", key=f"del_e_{i}"):
                     to_del = i
             if to_del is not None:
                 st.session_state.expense_logs.pop(to_del)
-                save_cloud_state()
                 st.rerun()
 
+    # --- VEHICLE DELIVERIES ---
     with t3:
-        driver = st.selectbox("Delivery Host", hosts, key="driver_input")
-        del_car = st.selectbox("Vehicle Delivered", [v["name"] for v in vehicle_configs], key="del_car_input")
-        del_fee = st.number_input("Delivery Fee ($)", min_value=0.0, value=float(default_delivery_fee), step=5.0, key="del_amt_input")
-        del_loc = st.text_input("Location", "Airport / Address", key="del_loc_input")
+        d1, d2 = st.columns(2)
+        with d1:
+            driver = st.selectbox("Delivery Host", hosts, key="driver_input")
+            del_car = st.selectbox("Vehicle Delivered", [v["name"] for v in vehicle_configs], key="del_car_input")
+            del_d = st.date_input("Date", datetime.now(), key="del_date_input")
+        with d2:
+            del_guest = st.selectbox("Related Renter (Guest)", guest_list, key="del_guest_input")
+            del_fee = st.number_input("Delivery Fee ($)", min_value=0.0, value=float(default_delivery_fee), step=5.0, key="del_amt_input")
+            del_loc = st.text_input("Location", "Airport / Address", key="del_loc_input")
 
         if st.button("➕ Log Delivery") and del_fee > 0:
             st.session_state.delivery_logs.append({
-                "Date": datetime.now().strftime("%Y-%m-%d"),
+                "Date": del_d.strftime("%Y-%m-%d"),
                 "Host": driver,
                 "Vehicle": del_car,
+                "Guest": del_guest,
                 "Location": del_loc,
                 "Amount ($)": del_fee
             })
-            save_cloud_state()
-            st.success("✅ Delivery logged and saved to cloud!")
+            st.success("✅ Delivery logged! (Click 'Save All Data' in sidebar to persist)")
             st.rerun()
 
         if st.session_state.delivery_logs:
             st.markdown("#### Existing Delivery Logs")
             to_del = None
             for i, log in enumerate(st.session_state.delivery_logs):
-                col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 3, 2, 1])
-                col1.write(f"📅 {log['Date']}")
-                col2.write(f"👤 {log['Host']}")
-                col3.write(f"🚗 {log['Vehicle']}")
-                col4.write(f"📍 {log['Location']}")
-                col5.write(f"💵 ${log['Amount ($)']:.2f}")
-                if col6.button("🗑️", key=f"del_d_{i}"):
+                col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 1, 2, 2, 2, 1, 1])
+                col1.write(f"📅 {log.get('Date', 'N/A')}")
+                col2.write(f"👤 {log.get('Host', '')}")
+                col3.write(f"🚗 {log.get('Vehicle', '')}")
+                col4.write(f"🧑 {log.get('Guest', 'General / Unspecified')}")
+                col5.write(f"📍 {log.get('Location', '')}")
+                col6.write(f"💵 ${log.get('Amount ($)', 0):.2f}")
+                if col7.button("🗑️", key=f"del_d_{i}"):
                     to_del = i
             if to_del is not None:
                 st.session_state.delivery_logs.pop(to_del)
-                save_cloud_state()
                 st.rerun()
 
 # ---------------------------------------------------------
