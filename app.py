@@ -18,25 +18,39 @@ hosts = [host_a, host_b, host_c]
 st.sidebar.markdown("---")
 st.sidebar.header("🚘 Fleet & Ownership Splits")
 
-# Initialize default vehicles in session state if not already present
-if "vehicles" not in st.session_state:
+# Initialize default vehicles in session state if missing or outdated
+def init_default_vehicles():
     st.session_state.vehicles = [
         {"id": 0, "name": "Dodge Journey", "splits": {host_a: 36, host_b: 64, host_c: 0}},
         {"id": 1, "name": "Honda Civic", "splits": {host_a: 0, host_b: 80, host_c: 20}},
     ]
+    st.session_state.next_id = 2
 
-# Track highest assigned ID for unique key generation
+if "vehicles" not in st.session_state:
+    init_default_vehicles()
+
+# Ensure all stored vehicles have an 'id' key (prevents KeyError from old sessions)
+for idx, car in enumerate(st.session_state.vehicles):
+    if "id" not in car:
+        car["id"] = idx
+
 if "next_id" not in st.session_state:
     st.session_state.next_id = len(st.session_state.vehicles)
 
-# Button to dynamically add a new car
-if st.sidebar.button("➕ Add New Vehicle"):
-    new_id = st.session_state.next_id
-    st.session_state.vehicles.append(
-        {"id": new_id, "name": f"Vehicle {new_id + 1}", "splits": {host_a: 33, host_b: 33, host_c: 34}}
-    )
-    st.session_state.next_id += 1
-    st.rerun()
+col_add, col_reset = st.sidebar.columns(2)
+with col_add:
+    if st.button("➕ Add Vehicle"):
+        new_id = st.session_state.next_id
+        st.session_state.vehicles.append(
+            {"id": new_id, "name": f"Vehicle {new_id + 1}", "splits": {host_a: 33, host_b: 33, host_c: 34}}
+        )
+        st.session_state.next_id += 1
+        st.rerun()
+
+with col_reset:
+    if st.button("🔄 Reset Fleet"):
+        init_default_vehicles()
+        st.rerun()
 
 # Render controls for each vehicle
 vehicle_configs = []
@@ -150,6 +164,11 @@ if uploaded_file is not None:
         st.success(f"📊 Dashboard Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         summary_df = pd.DataFrame(totals).T
         st.dataframe(summary_df.style.format("${:,.2f}"))
+
+    except Exception as e:
+        st.error(f"Error reading file structure. Technical details: {e}")
+else:
+    st.info("💡 Awaiting Turo CSV file upload to calculate live payouts.")
 
     except Exception as e:
         st.error(f"Error reading file structure. Technical details: {e}")
