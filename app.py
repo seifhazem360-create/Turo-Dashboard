@@ -33,13 +33,15 @@ def init_supabase():
 supabase = init_supabase()
 
 def clean_for_json(obj):
-    """Recursively clean NaN/NaT values so Supabase JSON upload never fails."""
-    if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
-        return None
-    if pd.isna(obj):
-        return None
+    """Safely clean scalar NaN/NaT values for Supabase JSON upload."""
+    if pd.api.types.is_scalar(obj):
+        if pd.isna(obj):
+            return None
+        if isinstance(obj, (float, np.float64, np.float32)) and (np.isnan(obj) or np.isinf(obj)):
+            return None
+        return obj
     if isinstance(obj, dict):
-        return {k: clean_for_json(v) for k, v in obj.items()}
+        return {str(k): clean_for_json(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [clean_for_json(v) for v in obj]
     return obj
