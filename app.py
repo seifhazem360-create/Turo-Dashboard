@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import json
+from supabase import create_client, Client
 
 # Page Configuration
 st.set_page_config(page_title="Fleet Command | Turo Fleet Dashboard", page_icon="🚗", layout="wide")
@@ -17,42 +18,96 @@ st.title("🚗 FleetCommand Dashboard")
 st.caption("Multi-Host Turo Fleet Analytics, Revenue Splitting & Operations Manager")
 
 # ---------------------------------------------------------
+# SUPABASE CLOUD CONNECTION
+# ---------------------------------------------------------
+@st.cache_resource
+def init_supabase():
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception:
+        return None
+
+supabase = init_supabase()
+
+def load_cloud_state():
+    if not supabase:
+        return None
+    try:
+        res = supabase.table("app_state").select("data").eq("id", 1).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]["data"]
+    except Exception:
+        pass
+    return None
+
+def save_cloud_state():
+    if not supabase:
+        return
+    try:
+        state_payload = {
+            "host_a": st.session_state.get("host_a_val", "AH"),
+            "host_b": st.session_state.get("host_b_val", "SA"),
+            "host_c": st.session_state.get("host_c_val", "OM"),
+            "default_clean_fee": st.session_state.get("clean_fee_val", 25.0),
+            "default_delivery_fee": st.session_state.get("delivery_fee_val", 30.0),
+            "vehicles": st.session_state.get("vehicles", []),
+            "cleaning_logs": st.session_state.get("cleaning_logs", []),
+            "expense_logs": st.session_state.get("expense_logs", []),
+            "delivery_logs": st.session_state.get("delivery_logs", []),
+        }
+        supabase.table("app_state").upsert({"id": 1, "data": state_payload}).execute()
+    except Exception:
+        pass
+
+cloud_data = load_cloud_state() or {}
+
+# ---------------------------------------------------------
 # 1. SIDEBAR CONFIGURATIONS & DEFAULTS
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Host Configuration")
-host_a = st.sidebar.text_input("Host A Name", "AH")
-host_b = st.sidebar.text_input("Host B Name", "SA")
-host_c = st.sidebar.text_input("Host C Name", "OM")
+saved_host_a = cloud_data.get("host_a", "AH")
+saved_host_b = cloud_data.get("host_b", "SA")
+saved_host_c = cloud_data.get("host_c", "OM")
+
+host_a = st.sidebar.text_input("Host A Name", saved_host_a, key="host_a_val")
+host_b = st.sidebar.text_input("Host B Name", saved_host_b, key="host_b_val")
+host_c = st.sidebar.text_input("Host C Name", saved_host_c, key="host_c_val")
 
 hosts = [host_a, host_b, host_c]
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Operational Task Defaults")
-default_clean_fee = st.sidebar.number_input("Default Cleaning Fee ($)", min_value=0.0, value=25.0, step=5.0)
-default_delivery_fee = st.sidebar.number_input("Default Delivery Fee ($)", min_value=0.0, value=30.0, step=5.0)
+saved_clean_fee = cloud_data.get("default_clean_fee", 25.0)
+saved_delivery_fee = cloud_data.get("default_delivery_fee", 30.0)
+
+default_clean_fee = st.sidebar.number_input("Default Cleaning Fee ($)", min_value=0.0, value=float(saved_clean_fee), step=5.0, key="clean_fee_val")
+default_delivery_fee = st.sidebar.number_input("Default Delivery Fee ($)", min_value=0.0, value=float(saved_delivery_fee), step=5.0, key="delivery_fee_val")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🚘 Fleet Ownership & Splits")
 
 def init_default_vehicles():
-    st.session_state.vehicles = [
+    return [
         {"id": 0, "name": "Dodge Journey", "splits": {host_a: 50, host_b: 50, host_c: 0}},
         {"id": 1, "name": "Kia Forte", "splits": {host_a: 0, host_b: 0, host_c: 100}},
     ]
-    st.session_state.next_id = 2
 
-# Initialize Session State Variables
 if "vehicles" not in st.session_state:
-    init_default_vehicles()
+    if "vehicles" in cloud_data and cloud_data["vehicles"]:
+        st.session_state.vehicles = cloud_data["vehicles"]
+    else:
+        st.session_state.vehicles = init_default_vehicles()
 
 if "cleaning_logs" not in st.session_state:
-    st.session_state.cleaning_logs = []
+    st.session_state.cleaning_logs = cloud_data.get("cleaning_logs", [])
 
 if "expense_logs" not in st.session_state:
-    st.session_state.expense_logs = []
+    st.session_state.expense_logs = cloud_data.get("expense_logs", [])
 
 if "delivery_logs" not in st.session_state:
-    st.session_state.delivery_logs = []
+    st.session_state.delivery_logs = cloud_data.get("delivery_logs", [])
 
 if "trips_data" not in st.session_state:
     st.session_state.trips_data = pd.DataFrame()
@@ -65,7 +120,7 @@ for idx, car in enumerate(st.session_state.vehicles):
         car["id"] = idx
 
 if "next_id" not in st.session_state:
-    st.session_state.next_id = len(st.session_state.vehicles)
+    st.session_state.next_id = max([c["id"] for c in st.session_state.vehicles], default=0) + 1
 
 col_add, col_reset = st.sidebar.columns(2)
 with col_add:
@@ -75,11 +130,13 @@ with col_add:
             {"id": new_id, "name": f"Vehicle {new_id + 1}", "splits": {host_a: 33, host_b: 33, host_c: 34}}
         )
         st.session_state.next_id += 1
+        save_cloud_state()
         st.rerun()
 
 with col_reset:
     if st.sidebar.button("🔄 Reset Fleet"):
-        init_default_vehicles()
+        st.session_state.vehicles = init_default_vehicles()
+        save_cloud_state()
         st.rerun()
 
 vehicle_configs = []
@@ -91,6 +148,7 @@ for idx, car in enumerate(st.session_state.vehicles):
         new_name = st.text_input("Vehicle Name", value=car["name"], key=f"car_name_{car_id}")
         if new_name != car["name"]:
             car["name"] = new_name
+            save_cloud_state()
             st.rerun()
 
         st.markdown("**Host Split Shares %**")
@@ -98,7 +156,7 @@ for idx, car in enumerate(st.session_state.vehicles):
         total_pct = 0
         for h in hosts:
             default_val = car["splits"].get(h, 0)
-            val = st.number_input(f"{h} Cut %", min_value=0, max_value=100, value=default_val, key=f"split_{car_id}_{h}")
+            val = st.number_input(f"{h} Cut %", min_value=0, max_value=100, value=int(default_val), key=f"split_{car_id}_{h}")
             car["splits"][h] = val
             splits[h] = val / 100.0
             total_pct += val
@@ -113,42 +171,11 @@ for idx, car in enumerate(st.session_state.vehicles):
 
 if to_delete is not None:
     st.session_state.vehicles.pop(to_delete)
+    save_cloud_state()
     st.rerun()
 
-# ---------------------------------------------------------
-# GLOBAL BACKUP & SAVE SYSTEM (SIDEBAR)
-# ---------------------------------------------------------
-st.sidebar.markdown("---")
-st.sidebar.header("💾 Global State Backup")
-
-# Compile state dictionary for export
-state_backup = {
-    "vehicles": st.session_state.vehicles,
-    "cleaning_logs": st.session_state.cleaning_logs,
-    "expense_logs": st.session_state.expense_logs,
-    "delivery_logs": st.session_state.delivery_logs,
-}
-backup_json = json.dumps(state_backup, indent=4)
-
-st.sidebar.download_button(
-    label="📥 Download Session Backup",
-    data=backup_json,
-    file_name=f"fleet_backup_{datetime.now().strftime('%Y%m%d')}.json",
-    mime="application/json",
-)
-
-uploaded_backup = st.sidebar.file_uploader("📤 Restore Session Backup", type=["json"])
-if uploaded_backup is not None:
-    try:
-        restored_data = json.load(uploaded_backup)
-        st.session_state.vehicles = restored_data.get("vehicles", st.session_state.vehicles)
-        st.session_state.cleaning_logs = restored_data.get("cleaning_logs", [])
-        st.session_state.expense_logs = restored_data.get("expense_logs", [])
-        st.session_state.delivery_logs = restored_data.get("delivery_logs", [])
-        st.sidebar.success("✅ Backup restored successfully!")
-        st.rerun()
-    except Exception as e:
-        st.sidebar.error(f"Error loading backup: {e}")
+# Automatically save cloud state when sidebar defaults change
+save_cloud_state()
 
 # ---------------------------------------------------------
 # 2. FILE UPLOADER & DYNAMIC PARSER
@@ -173,7 +200,6 @@ def parse_date(date_str):
     except Exception:
         return None
 
-# Process New File Uploads
 if uploaded_file is not None:
     is_new_file = st.session_state.uploaded_filename != uploaded_file.name
     is_old_structure = not st.session_state.trips_data.empty and "Fees & Deductions" not in st.session_state.trips_data.columns
@@ -233,7 +259,7 @@ if uploaded_file is not None:
 
             st.session_state.trips_data = pd.DataFrame(parsed_trips)
             st.session_state.uploaded_filename = uploaded_file.name
-            st.success("✅ File processed and saved to dashboard memory!")
+            st.success("✅ File processed and synced to cloud!")
         except Exception as e:
             st.error(f"Error parsing uploaded file: {e}")
 
@@ -247,7 +273,6 @@ nav_tab1, nav_tab2, nav_tab3, nav_tab4 = st.tabs([
     "⚙️ Fleet Management"
 ])
 
-# Global Filters Bar
 filtered_df = pd.DataFrame()
 if not st.session_state.trips_data.empty:
     st.markdown("### 🔍 Filters")
@@ -429,6 +454,7 @@ with nav_tab3:
                         "Vehicle": clean_car,
                         "Amount ($)": clean_fee
                     })
+                    save_cloud_state()
                     st.rerun()
 
         if st.session_state.cleaning_logs:
@@ -443,6 +469,7 @@ with nav_tab3:
                     to_del = i
             if to_del is not None:
                 st.session_state.cleaning_logs.pop(to_del)
+                save_cloud_state()
                 st.rerun()
 
     with t2:
@@ -465,6 +492,7 @@ with nav_tab3:
                         "Description": exp_desc,
                         "Amount ($)": exp_amt
                     })
+                    save_cloud_state()
                     st.rerun()
 
         if st.session_state.expense_logs:
@@ -480,6 +508,7 @@ with nav_tab3:
                     to_del = i
             if to_del is not None:
                 st.session_state.expense_logs.pop(to_del)
+                save_cloud_state()
                 st.rerun()
 
     with t3:
@@ -502,6 +531,7 @@ with nav_tab3:
                         "Location": del_loc,
                         "Amount ($)": del_fee
                     })
+                    save_cloud_state()
                     st.rerun()
 
         if st.session_state.delivery_logs:
@@ -517,6 +547,7 @@ with nav_tab3:
                     to_del = i
             if to_del is not None:
                 st.session_state.delivery_logs.pop(to_del)
+                save_cloud_state()
                 st.rerun()
 
 # ---------------------------------------------------------
