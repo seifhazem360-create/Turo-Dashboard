@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import numpy as np
 import json
 from supabase import create_client, Client
 
@@ -31,6 +32,18 @@ def init_supabase():
 
 supabase = init_supabase()
 
+def clean_for_json(obj):
+    """Recursively clean NaN/NaT values so Supabase JSON upload never fails."""
+    if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
+        return None
+    if pd.isna(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_for_json(v) for v in obj]
+    return obj
+
 def load_cloud_state():
     if not supabase:
         return None
@@ -52,9 +65,10 @@ def save_cloud_state():
             for col in ["Start Date", "End Date"]:
                 if col in df_temp.columns:
                     df_temp[col] = pd.to_datetime(df_temp[col]).dt.strftime("%Y-%m-%d")
+            df_temp = df_temp.where(pd.notnull(df_temp), None)
             trips_list = df_temp.to_dict(orient="records")
 
-        state_payload = {
+        raw_payload = {
             "host_a": st.session_state.get("host_a_val", "AH"),
             "host_b": st.session_state.get("host_b_val", "SA"),
             "host_c": st.session_state.get("host_c_val", "OM"),
@@ -67,6 +81,10 @@ def save_cloud_state():
             "trips_data": trips_list,
             "uploaded_filename": st.session_state.get("uploaded_filename", None)
         }
+        
+        # Clean all NaNs out of dictionaries and lists
+        state_payload = clean_for_json(raw_payload)
+
         supabase.table("app_state").upsert({"id": 1, "data": state_payload}).execute()
         return True
     except Exception as e:
