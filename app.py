@@ -38,8 +38,8 @@ def load_cloud_state():
         res = supabase.table("app_state").select("data").eq("id", 1).execute()
         if res.data and len(res.data) > 0:
             return res.data[0]["data"]
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error loading cloud state: {e}")
     return None
 
 def save_cloud_state():
@@ -51,7 +51,7 @@ def save_cloud_state():
             df_temp = st.session_state.trips_data.copy()
             for col in ["Start Date", "End Date"]:
                 if col in df_temp.columns:
-                    df_temp[col] = df_temp[col].astype(str)
+                    df_temp[col] = pd.to_datetime(df_temp[col]).dt.strftime("%Y-%m-%d")
             trips_list = df_temp.to_dict(orient="records")
 
         state_payload = {
@@ -183,7 +183,7 @@ if to_delete is not None:
     save_cloud_state()
     st.rerun()
 
-# Automatically save configuration changes to cloud
+# Automatically save sidebar/host changes to cloud
 save_cloud_state()
 
 # ---------------------------------------------------------
@@ -266,7 +266,15 @@ if uploaded_file is not None:
                     "Splits": car_splits
                 })
 
-            st.session_state.trips_data = pd.DataFrame(parsed_trips)
+            new_df = pd.DataFrame(parsed_trips)
+            
+            # Merge with existing trips if file is updated incrementally
+            if not st.session_state.trips_data.empty and is_new_file:
+                combined_df = pd.concat([st.session_state.trips_data, new_df]).drop_duplicates(subset=["Guest", "Start Date", "Net Total"], keep="last")
+                st.session_state.trips_data = combined_df
+            else:
+                st.session_state.trips_data = new_df
+
             st.session_state.uploaded_filename = uploaded_file.name
             save_cloud_state()
             st.success("✅ File processed and synced to cloud!")
