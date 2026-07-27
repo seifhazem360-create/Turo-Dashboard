@@ -46,6 +46,15 @@ def save_cloud_state():
     if not supabase:
         return
     try:
+        # Convert trips dataframe to JSON records for cloud storage
+        trips_list = []
+        if "trips_data" in st.session_state and not st.session_state.trips_data.empty:
+            df_temp = st.session_state.trips_data.copy()
+            for col in ["Start Date", "End Date"]:
+                if col in df_temp.columns:
+                    df_temp[col] = df_temp[col].astype(str)
+            trips_list = df_temp.to_dict(orient="records")
+
         state_payload = {
             "host_a": st.session_state.get("host_a_val", "AH"),
             "host_b": st.session_state.get("host_b_val", "SA"),
@@ -56,6 +65,8 @@ def save_cloud_state():
             "cleaning_logs": st.session_state.get("cleaning_logs", []),
             "expense_logs": st.session_state.get("expense_logs", []),
             "delivery_logs": st.session_state.get("delivery_logs", []),
+            "trips_data": trips_list,
+            "uploaded_filename": st.session_state.get("uploaded_filename", None)
         }
         supabase.table("app_state").upsert({"id": 1, "data": state_payload}).execute()
     except Exception:
@@ -110,10 +121,18 @@ if "delivery_logs" not in st.session_state:
     st.session_state.delivery_logs = cloud_data.get("delivery_logs", [])
 
 if "trips_data" not in st.session_state:
-    st.session_state.trips_data = pd.DataFrame()
+    saved_trips = cloud_data.get("trips_data", [])
+    if saved_trips:
+        df_restored = pd.DataFrame(saved_trips)
+        for col in ["Start Date", "End Date"]:
+            if col in df_restored.columns:
+                df_restored[col] = pd.to_datetime(df_restored[col]).dt.date
+        st.session_state.trips_data = df_restored
+    else:
+        st.session_state.trips_data = pd.DataFrame()
 
 if "uploaded_filename" not in st.session_state:
-    st.session_state.uploaded_filename = None
+    st.session_state.uploaded_filename = cloud_data.get("uploaded_filename", None)
 
 for idx, car in enumerate(st.session_state.vehicles):
     if "id" not in car:
@@ -174,7 +193,6 @@ if to_delete is not None:
     save_cloud_state()
     st.rerun()
 
-# Automatically save cloud state when sidebar defaults change
 save_cloud_state()
 
 # ---------------------------------------------------------
@@ -259,6 +277,7 @@ if uploaded_file is not None:
 
             st.session_state.trips_data = pd.DataFrame(parsed_trips)
             st.session_state.uploaded_filename = uploaded_file.name
+            save_cloud_state()
             st.success("✅ File processed and synced to cloud!")
         except Exception as e:
             st.error(f"Error parsing uploaded file: {e}")
