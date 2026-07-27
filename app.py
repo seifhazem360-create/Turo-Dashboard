@@ -5,24 +5,10 @@ from datetime import datetime
 # Page Configuration
 st.set_page_config(page_title="Fleet Command | Turo Fleet Dashboard", page_icon="🚗", layout="wide")
 
-# Custom CSS for Modern UI Polish
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #1E222D;
-        border-radius: 10px;
-        padding: 15px;
-        border: 1px solid #2E3440;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        font-weight: 600;
-        font-size: 16px;
-    }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; font-weight: 600; font-size: 16px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -54,6 +40,7 @@ def init_default_vehicles():
     ]
     st.session_state.next_id = 2
 
+# Initialize Session State Variables
 if "vehicles" not in st.session_state:
     init_default_vehicles()
 
@@ -65,6 +52,12 @@ if "expense_logs" not in st.session_state:
 
 if "delivery_logs" not in st.session_state:
     st.session_state.delivery_logs = []
+
+if "trips_data" not in st.session_state:
+    st.session_state.trips_data = pd.DataFrame()
+
+if "uploaded_filename" not in st.session_state:
+    st.session_state.uploaded_filename = None
 
 for idx, car in enumerate(st.session_state.vehicles):
     if "id" not in car:
@@ -122,7 +115,7 @@ if to_delete is not None:
     st.rerun()
 
 # ---------------------------------------------------------
-# 2. FILE UPLOADER & PARSER
+# 2. FILE UPLOADER & PERSISTENT PARSER
 # ---------------------------------------------------------
 uploaded_file = st.file_uploader("📂 Upload Turo Earnings File (CSV / TSV)", type=["csv", "tsv", "txt"])
 
@@ -144,6 +137,59 @@ def parse_date(date_str):
     except Exception:
         return None
 
+# Process New File Uploads
+if uploaded_file is not None:
+    if st.session_state.uploaded_filename != uploaded_file.name:
+        try:
+            content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
+            uploaded_file.seek(0)
+            sep = '\t' if '\t' in content.split('\n')[0] else ','
+            df_raw = pd.read_csv(uploaded_file, sep=sep, header=None)
+
+            parsed_trips = []
+            for _, row in df_raw.iterrows():
+                if len(row) < 10:
+                    continue
+                
+                guest_name = str(row.iloc[1])
+                vehicle_text = f"{str(row.iloc[2])} {str(row.iloc[3])}".lower()
+                start_date = parse_date(row.iloc[6])
+                end_date = parse_date(row.iloc[7])
+                status = str(row.iloc[10]).strip()
+                
+                trip_earnings = parse_currency(row.iloc[15]) if len(row) > 15 else 0.0
+                extras = parse_currency(row.iloc[27]) if len(row) > 27 else 0.0
+                reimbursements = parse_currency(row.iloc[29]) if len(row) > 29 else 0.0
+                net_total = parse_currency(row.iloc[-1])
+                
+                matched_car = "Unmatched Vehicles"
+                car_splits = {h: 1.0 / len(hosts) for h in hosts}
+                
+                for v_config in vehicle_configs:
+                    if v_config["name"].lower() in vehicle_text and v_config["name"].strip() != "":
+                        matched_car = v_config["name"]
+                        car_splits = v_config["splits"]
+                        break
+
+                parsed_trips.append({
+                    "Guest": guest_name,
+                    "Vehicle": matched_car,
+                    "Start Date": start_date,
+                    "End Date": end_date,
+                    "Status": status,
+                    "Trip Earnings": trip_earnings,
+                    "Extras": extras,
+                    "Reimbursements": reimbursements,
+                    "Net Total": net_total,
+                    "Splits": car_splits
+                })
+
+            st.session_state.trips_data = pd.DataFrame(parsed_trips)
+            st.session_state.uploaded_filename = uploaded_file.name
+            st.success("✅ File processed and saved to dashboard memory!")
+        except Exception as e:
+            st.error(f"Error parsing uploaded file: {e}")
+
 # ---------------------------------------------------------
 # 3. MAIN NAVIGATION TABS
 # ---------------------------------------------------------
@@ -154,77 +200,26 @@ nav_tab1, nav_tab2, nav_tab3, nav_tab4 = st.tabs([
     "⚙️ Fleet Management"
 ])
 
-# Process CSV Data if Available
-parsed_trips = []
-if uploaded_file is not None:
-    try:
-        content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
-        uploaded_file.seek(0)
-        sep = '\t' if '\t' in content.split('\n')[0] else ','
-        df_raw = pd.read_csv(uploaded_file, sep=sep, header=None)
-
-        for _, row in df_raw.iterrows():
-            if len(row) < 10:
-                continue
-            
-            guest_name = str(row.iloc[1])
-            vehicle_text = f"{str(row.iloc[2])} {str(row.iloc[3])}".lower()
-            start_date = parse_date(row.iloc[6])
-            end_date = parse_date(row.iloc[7])
-            status = str(row.iloc[10]).strip()
-            
-            trip_earnings = parse_currency(row.iloc[15]) if len(row) > 15 else 0.0
-            extras = parse_currency(row.iloc[27]) if len(row) > 27 else 0.0
-            reimbursements = parse_currency(row.iloc[29]) if len(row) > 29 else 0.0
-            net_total = parse_currency(row.iloc[-1])
-            
-            matched_car = "Unmatched Vehicles"
-            car_splits = {h: 1.0 / len(hosts) for h in hosts}
-            
-            for v_config in vehicle_configs:
-                if v_config["name"].lower() in vehicle_text and v_config["name"].strip() != "":
-                    matched_car = v_config["name"]
-                    car_splits = v_config["splits"]
-                    break
-
-            parsed_trips.append({
-                "Guest": guest_name,
-                "Vehicle": matched_car,
-                "Start Date": start_date,
-                "End Date": end_date,
-                "Status": status,
-                "Trip Earnings": trip_earnings,
-                "Extras": extras,
-                "Reimbursements": reimbursements,
-                "Net Total": net_total,
-                "Splits": car_splits
-            })
-
-    except Exception as e:
-        st.error(f"Error parsing uploaded file: {e}")
-
-trips_df = pd.DataFrame(parsed_trips) if parsed_trips else pd.DataFrame()
-
 # Global Filters Bar
-if not trips_df.empty:
+filtered_df = pd.DataFrame()
+if not st.session_state.trips_data.empty:
     st.markdown("### 🔍 Filters")
     f_col1, f_col2, f_col3 = st.columns(3)
     
     with f_col1:
-        min_d = trips_df["Start Date"].dropna().min() if not trips_df["Start Date"].dropna().empty else datetime.now().date()
-        max_d = trips_df["End Date"].dropna().max() if not trips_df["End Date"].dropna().empty else datetime.now().date()
+        min_d = st.session_state.trips_data["Start Date"].dropna().min() if not st.session_state.trips_data["Start Date"].dropna().empty else datetime.now().date()
+        max_d = st.session_state.trips_data["End Date"].dropna().max() if not st.session_state.trips_data["End Date"].dropna().empty else datetime.now().date()
         selected_dates = st.date_input("Date Range", [min_d, max_d])
         
     with f_col2:
-        car_options = ["All Vehicles"] + list(trips_df["Vehicle"].unique())
+        car_options = ["All Vehicles"] + list(st.session_state.trips_data["Vehicle"].unique())
         selected_car = st.selectbox("Filter by Vehicle", car_options)
         
     with f_col3:
-        status_options = ["All Statuses"] + list(trips_df["Status"].unique())
+        status_options = ["All Statuses"] + list(st.session_state.trips_data["Status"].unique())
         selected_status = st.selectbox("Filter by Trip Status", status_options)
 
-    # Apply Filters
-    filtered_df = trips_df.copy()
+    filtered_df = st.session_state.trips_data.copy()
     if len(selected_dates) == 2:
         filtered_df = filtered_df[
             (filtered_df["Start Date"] >= selected_dates[0]) & 
@@ -234,8 +229,6 @@ if not trips_df.empty:
         filtered_df = filtered_df[filtered_df["Vehicle"] == selected_car]
     if selected_status != "All Statuses":
         filtered_df = filtered_df[filtered_df["Status"] == selected_status]
-else:
-    filtered_df = pd.DataFrame()
 
 # ---------------------------------------------------------
 # TAB 1: OVERVIEW & ANALYTICS
@@ -246,7 +239,6 @@ with nav_tab1:
         total_trips = len(filtered_df)
         completed_trips = len(filtered_df[filtered_df["Status"].str.lower() == "completed"])
         
-        # Calculate Host Splits
         host_totals = {
             h: {
                 "Pool Split Earnings": 0.0,
@@ -258,38 +250,48 @@ with nav_tab1:
             } for h in hosts
         }
 
-        # Sum Logged Tasks
+        # Calculate Task Costs per Vehicle
+        vehicle_task_deductions = {}
         for log in st.session_state.cleaning_logs:
+            v = log["Vehicle"]
+            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + log["Amount ($)"]
             if log["Host"] in host_totals:
                 host_totals[log["Host"]]["Tasks Completed"] += 1
                 host_totals[log["Host"]]["Cleaning Earned"] += log["Amount ($)"]
 
         for log in st.session_state.delivery_logs:
+            v = log["Vehicle"]
+            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + log["Amount ($)"]
             if log["Host"] in host_totals:
                 host_totals[log["Host"]]["Tasks Completed"] += 1
                 host_totals[log["Host"]]["Delivery Earned"] += log["Amount ($)"]
 
         for log in st.session_state.expense_logs:
+            v = log["Vehicle"]
+            vehicle_task_deductions[v] = vehicle_task_deductions.get(v, 0.0) + log["Amount ($)"]
             if log["Host"] in host_totals:
                 host_totals[log["Host"]]["Expenses Reimbursed"] += log["Amount ($)"]
 
-        total_tasks_cost = (
-            sum(l["Amount ($)"] for l in st.session_state.cleaning_logs) +
-            sum(l["Amount ($)"] for l in st.session_state.delivery_logs) +
-            sum(l["Amount ($)"] for l in st.session_state.expense_logs)
-        )
+        total_tasks_cost = sum(vehicle_task_deductions.values())
 
-        # Distribute trip revenue
-        for _, row in filtered_df.iterrows():
-            net = row["Net Total"]
-            splits = row["Splits"]
-            for h, pct in splits.items():
-                host_totals[h]["Pool Split Earnings"] += net * pct
+        vehicle_gross_totals = filtered_df.groupby("Vehicle")["Net Total"].sum().to_dict()
+        
+        for v_config in vehicle_configs:
+            v_name = v_config["name"]
+            v_gross = vehicle_gross_totals.get(v_name, 0.0)
+            v_deduction = vehicle_task_deductions.get(v_name, 0.0)
+            v_net_pool = max(0.0, v_gross - v_deduction)
+            
+            for h, pct in v_config["splits"].items():
+                if h in host_totals:
+                    host_totals[h]["Pool Split Earnings"] += v_net_pool * pct
 
-        # Deduct tasks/expenses from total pool evenly across hosts
-        task_deduction_per_host = total_tasks_cost / len(hosts) if total_tasks_cost > 0 else 0.0
+        general_deduction = vehicle_task_deductions.get("General Fleet", 0.0) + vehicle_task_deductions.get("General / Unspecified", 0.0)
+        if general_deduction > 0:
+            for h in hosts:
+                host_totals[h]["Pool Split Earnings"] -= (general_deduction / len(hosts))
+
         for h in hosts:
-            host_totals[h]["Pool Split Earnings"] -= task_deduction_per_host
             host_totals[h]["Net Final Payout"] = (
                 host_totals[h]["Pool Split Earnings"] +
                 host_totals[h]["Cleaning Earned"] +
@@ -367,7 +369,7 @@ with nav_tab3:
             c1, c2, c3 = st.columns([2, 2, 1])
             with c1:
                 cleaner = st.selectbox("Host Cleaner", hosts)
-                clean_car = st.selectbox("Vehicle", [v["name"] for v in vehicle_configs] + ["General"])
+                clean_car = st.selectbox("Vehicle", [v["name"] for v in vehicle_configs] + ["General / Unspecified"])
             with c2:
                 clean_fee = st.number_input("Cleaning Fee ($)", min_value=0.0, value=default_clean_fee, step=5.0)
                 clean_d = st.date_input("Date", datetime.now())
