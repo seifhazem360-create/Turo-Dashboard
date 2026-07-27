@@ -115,7 +115,7 @@ if to_delete is not None:
     st.rerun()
 
 # ---------------------------------------------------------
-# 2. FILE UPLOADER & PERSISTENT PARSER
+# 2. FILE UPLOADER & DYNAMIC PARSER
 # ---------------------------------------------------------
 uploaded_file = st.file_uploader("📂 Upload Turo Earnings File (CSV / TSV)", type=["csv", "tsv", "txt"])
 
@@ -158,9 +158,18 @@ if uploaded_file is not None:
                 status = str(row.iloc[10]).strip()
                 
                 trip_earnings = parse_currency(row.iloc[15]) if len(row) > 15 else 0.0
-                extras = parse_currency(row.iloc[27]) if len(row) > 27 else 0.0
-                reimbursements = parse_currency(row.iloc[29]) if len(row) > 29 else 0.0
                 net_total = parse_currency(row.iloc[-1])
+                
+                # Dynamic scan for ALL reimbursements and deductions across the entire row
+                pos_reimbursements = 0.0
+                neg_deductions = 0.0
+                if len(row) > 16:
+                    for col_idx in range(16, len(row) - 1):
+                        val = parse_currency(row.iloc[col_idx])
+                        if val > 0:
+                            pos_reimbursements += val
+                        elif val < 0:
+                            neg_deductions += val
                 
                 matched_car = "Unmatched Vehicles"
                 car_splits = {h: 1.0 / len(hosts) for h in hosts}
@@ -178,8 +187,8 @@ if uploaded_file is not None:
                     "End Date": end_date,
                     "Status": status,
                     "Trip Earnings": trip_earnings,
-                    "Extras": extras,
-                    "Reimbursements": reimbursements,
+                    "Extras & Reimbursements": pos_reimbursements,
+                    "Fees & Deductions": neg_deductions,
                     "Net Total": net_total,
                     "Splits": car_splits
                 })
@@ -338,22 +347,53 @@ with nav_tab1:
         st.info("💡 Upload a Turo Earnings CSV to view analytics.")
 
 # ---------------------------------------------------------
-# TAB 2: TRIP LEDGER
+# TAB 2: TRIP LEDGER & ITEM INSPECTION
 # ---------------------------------------------------------
 with nav_tab2:
     if not filtered_df.empty:
         st.markdown("### 📑 Master Trip Ledger")
-        st.dataframe(
-            filtered_df[["Guest", "Vehicle", "Start Date", "End Date", "Status", "Trip Earnings", "Extras", "Reimbursements", "Net Total"]],
-            column_config={
-                "Trip Earnings": st.column_config.NumberColumn(format="$%.2f"),
-                "Extras": st.column_config.NumberColumn(format="$%.2f"),
-                "Reimbursements": st.column_config.NumberColumn(format="$%.2f"),
-                "Net Total": st.column_config.NumberColumn(format="$%.2f"),
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        
+        # Item Inspection Menu
+        trip_options = ["All Trips (Full Ledger)"] + [
+            f"{row['Guest']} | {row['Vehicle']} ({row['Start Date']})" 
+            for _, row in filtered_df.iterrows()
+        ]
+        
+        selected_trip_label = st.selectbox("🔍 Choose a Trip to Inspect Details", trip_options, index=0)
+        
+        if selected_trip_label == "All Trips (Full Ledger)":
+            st.dataframe(
+                filtered_df[["Guest", "Vehicle", "Start Date", "End Date", "Status", "Trip Earnings", "Extras & Reimbursements", "Fees & Deductions", "Net Total"]],
+                column_config={
+                    "Trip Earnings": st.column_config.NumberColumn(format="$%.2f"),
+                    "Extras & Reimbursements": st.column_config.NumberColumn(format="$%.2f"),
+                    "Fees & Deductions": st.column_config.NumberColumn(format="$%.2f"),
+                    "Net Total": st.column_config.NumberColumn(format="$%.2f"),
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            selected_idx = trip_options.index(selected_trip_label) - 1
+            trip = filtered_df.iloc[selected_idx]
+            
+            st.markdown(f"#### 🧾 Itemized Breakdown: {trip['Guest']}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Base Trip Earnings", f"${trip['Trip Earnings']:,.2f}")
+            c2.metric("Extras & Reimbursements", f"${trip['Extras & Reimbursements']:,.2f}")
+            c3.metric("Fees / Deductions", f"${trip['Fees & Deductions']:,.2f}")
+            c4.metric("Net Total Payout", f"${trip['Net Total']:,.2f}")
+            
+            st.markdown("---")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write(f"**Guest Name:** {trip['Guest']}")
+                st.write(f"**Vehicle Assigned:** {trip['Vehicle']}")
+                st.write(f"**Trip Status:** {trip['Status']}")
+            with col_b:
+                st.write(f"**Start Date:** {trip['Start Date']}")
+                st.write(f"**End Date:** {trip['End Date']}")
+
     else:
         st.info("💡 Awaiting CSV upload to populate trip details.")
 
